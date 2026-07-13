@@ -397,6 +397,20 @@ def write_to_google_sheets(stock_rows: list[list], word_rows: list[list],
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
+def _record_source(day: str, article: dict, push_count: int) -> None:
+    """把當天分析的 PTT 文章連結寫入 sources.json（報告的參考資料來源）。"""
+    import json
+    path = os.path.join(BASE_DIR, "sources.json")
+    data = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    data[day] = {"title": article["title"], "url": article["url"],
+                 "pushes": push_count}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 def main():
     today = date.today()
     session = make_ptt_session()
@@ -408,12 +422,17 @@ def main():
         sys.exit("[結束] 沒有可分析的置底文章")
 
     all_texts = []
+    push_total = 0
     for art in pinned:
         print(f"  抓取：{art['title']}")
         data = get_article_content(session, art["url"])
         all_texts.append(data["content"])
         all_texts.extend(data["pushes"])
+        push_total += len(data["pushes"])
     print(f"[資訊] 共分析 {len(pinned)} 篇置底文章")
+
+    # 記錄今天的資料來源（PTT 文章連結）到 sources.json，供報告的參考資料使用
+    _record_source(today.isoformat(), pinned[0], push_total)
 
     # --- 步驟 2：斷詞統計 + 文字雲 ---
     print("[資訊] jieba 斷詞與詞頻統計...")

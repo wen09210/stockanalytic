@@ -34,10 +34,20 @@ import ptt_stock_wordcloud as wc
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")
 CSV_FALLBACK = os.path.join(BASE_DIR, "sheet_export.csv")
+SOURCES_FILE = os.path.join(BASE_DIR, "sources.json")  # 每天對應的 PTT 文章連結
 SPREADSHEET_NAME = "PTT股市熱門標的追蹤"
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1B3rQufouHb6n9z2yTvBpIeFK_Uxv1TcxcimXIGsED1s/edit"
 WORDCLOUD_OUTPUT = os.path.join(BASE_DIR, "wordcloud.png")
 REPORT_OUTPUT = os.path.join(BASE_DIR, "report.html")
+
+
+def load_sources() -> dict:
+    """讀取 sources.json：{日期: {title, url, pushes}}，作為報告的資料來源連結。"""
+    if os.path.exists(SOURCES_FILE):
+        import json
+        with open(SOURCES_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +249,7 @@ def write_tabbed_index(days: list, output_path: str) -> None:
 
 def main():
     rows = load_rows()
+    sources = load_sources()
 
     # 解析出所有日期（parse_sheet 一次取一天，先掃出全部日期清單）
     all_days = sorted({
@@ -261,8 +272,17 @@ def main():
         report_path = os.path.join(BASE_DIR, f"report_{day}.html")
         wc.draw_wordcloud(related, wc_path)
 
+        # 資料來源：優先用 sources.json 記錄的當日 PTT 文章連結；沒有才退回試算表
+        src = sources.get(day)
+        if src:
+            articles = [{
+                "title": f"PTT Stock 板　{src['title']}（採計 {src['pushes']} 則推文）",
+                "url": src["url"],
+            }, {"title": f"Google 試算表：{SPREADSHEET_NAME}", "url": SHEET_URL}]
+        else:
+            articles = [{"title": f"Google 試算表：{SPREADSHEET_NAME}（{day}）", "url": SHEET_URL}]
+
         stock_results = enrich_with_prices(stocks, day)
-        articles = [{"title": f"Google 試算表：{SPREADSHEET_NAME}（{day}）", "url": SHEET_URL}]
         wc.generate_html_report(
             board=wc.BOARD,
             articles=articles,
