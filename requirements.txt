@@ -1,0 +1,12 @@
+# PTT 股市熱門標的自動追蹤系統依賴套件
+# 安裝：python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+requests
+beautifulsoup4
+jieba
+wordcloud
+matplotlib
+yfinance
+gspread
+google-auth
+# Python 3.9（macOS 內建版本）沒有新版 cryptography 的預編譯 wheel，鎖定舊版避免編譯失敗
+cryptography<44; python_version < "3.10"

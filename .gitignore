@@ -1,0 +1,11 @@
+# Google Service Account 憑證——絕對不要 commit（repo 是公開的）
+credentials.json
+
+# Python 虛擬環境與快取
+.venv/
+__pycache__/
+*.pyc
+
+# 產出物（index.html 是發佈用快照，保留在版控內）
+wordcloud.png
+wordcloud_today.png
