@@ -22,6 +22,8 @@ import sys
 from collections import Counter
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import jieba
 from wordcloud import WordCloud
@@ -111,8 +113,27 @@ FONT_CANDIDATES = [
 # ---------------------------------------------------------------------------
 # 1. 爬取 PTT 置底文章
 # ---------------------------------------------------------------------------
+def _mount_retry_adapter(session: requests.Session, total: int = 5) -> None:
+    """幫 session 掛上會自動重試的 adapter。
+
+    某些雲端主機（例如 GitHub Actions runner 的出口 IP）連到 PTT 時，可能在
+    TLS 握手階段就被直接斷線（ConnectionResetError），而非回應 HTTP 錯誤碼，
+    通常是來源 IP 被防爬蟲規則封鎖。加上重試 + 指數退避仍值得一試。
+    """
+    retry = Retry(
+        total=total, connect=total, read=total,
+        backoff_factor=2,   # 重試間隔：2s, 4s, 8s, 16s, 32s...
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "HEAD"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+
 def make_ptt_session() -> requests.Session:
-    """建立帶有「滿 18 歲同意」cookie 的 requests Session。
+    """建立帶有「滿 18 歲同意」cookie、且會自動重試連線失敗的 requests Session。
 
     PTT 部分看板（如 Gossiping、Stock 不一定）會先跳出年齡確認頁，
     只要在 cookie 帶上 over18=1 即可跳過。
@@ -125,6 +146,7 @@ def make_ptt_session() -> requests.Session:
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
         )
     })
+    _mount_retry_adapter(session)
     return session
 
 
@@ -276,10 +298,12 @@ def fetch_tw_stock_list() -> dict:
     stock_map = {}
     # strMode=2 為上市、strMode=4 為上櫃
     sources = [(2, ".TW"), (4, ".TWO")]
+    session = requests.Session()
+    _mount_retry_adapter(session)
     try:
         for mode, suffix in sources:
             url = f"https://isin.twse.com.tw/isin/C_public.jsp?strMode={mode}"
-            resp = requests.get(url, timeout=20)
+            resp = session.get(url, timeout=20)
             resp.encoding = "big5"  # 該頁面為 Big5 編碼
             soup = BeautifulSoup(resp.text, "html.parser")
             for row in soup.select("table.h4 tr"):

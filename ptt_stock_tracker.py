@@ -46,10 +46,13 @@ PTT 股市熱門標的自動追蹤系統
 import os
 import re
 import sys
+import time
 from collections import Counter
 from datetime import date
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import jieba
 from wordcloud import WordCloud
@@ -120,8 +123,31 @@ FONT_CANDIDATES = [
 # ---------------------------------------------------------------------------
 # 1. 爬取 PTT 置底文章
 # ---------------------------------------------------------------------------
+def _mount_retry_adapter(session: requests.Session, total: int = 5) -> None:
+    """幫 session 掛上會自動重試的 adapter。
+
+    某些雲端主機（例如 GitHub Actions runner 的 Azure IP）在連到 PTT 時，
+    可能在 TLS 握手階段就被直接斷線（ConnectionResetError），而不是回應
+    HTTP 錯誤碼。這通常是來源 IP 被防爬蟲規則封鎖，重試「同一個」IP 不一定
+    保證成功，但仍可能因為 PTT 端規則是機率性節流、或中間節點是負載平衡
+    (多台前端只有部分有封鎖規則) 而在幾次重試後就打通，所以仍值得加上。
+    """
+    retry = Retry(
+        total=total,
+        connect=total,   # 涵蓋 TLS 握手被重置這類「連線建立階段」的失敗
+        read=total,
+        backoff_factor=2,   # 重試間隔：2s, 4s, 8s, 16s, 32s...
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "HEAD"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+
 def make_ptt_session() -> requests.Session:
-    """建立帶有「滿 18 歲同意」cookie 的 requests Session。"""
+    """建立帶有「滿 18 歲同意」cookie、且會自動重試連線失敗的 requests Session。"""
     session = requests.Session()
     session.cookies.set("over18", "1", domain=".ptt.cc")
     session.headers.update({
@@ -130,6 +156,7 @@ def make_ptt_session() -> requests.Session:
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
         )
     })
+    _mount_retry_adapter(session)
     return session
 
 
@@ -251,10 +278,12 @@ def fetch_tw_stock_list() -> dict:
     """
     stock_map = {}
     sources = [(2, "上市"), (4, "上櫃")]  # strMode=2 上市、4 上櫃
+    session = requests.Session()
+    _mount_retry_adapter(session)
     try:
         for mode, market in sources:
             url = f"https://isin.twse.com.tw/isin/C_public.jsp?strMode={mode}"
-            resp = requests.get(url, timeout=20)
+            resp = session.get(url, timeout=20)
             resp.encoding = "big5"  # 該頁為 Big5 編碼
             soup = BeautifulSoup(resp.text, "html.parser")
             for row in soup.select("table.h4 tr"):
@@ -339,8 +368,10 @@ def build_price_formula(code: str, check_date: date) -> str:
 def fetch_close_price(code: str, check_date: date):
     """用 yfinance 取「檢查日（含）以前最近交易日」的收盤價（涵蓋上市 .TW 與上櫃 .TWO）。
 
-    回傳浮點數；查不到回傳 None。寫成固定數值，數字不會隨時間漂移。
+    回傳浮點數；查不到（或資料是 NaN，例如剛上市、停牌）回傳 None。
+    寫成固定數值，數字不會隨時間漂移。
     """
+    import math
     import yfinance as yf
     target = check_date.isoformat()
     for suffix in (".TW", ".TWO"):  # 先試上市再試上櫃
@@ -351,7 +382,9 @@ def fetch_close_price(code: str, check_date: date):
             best = None
             for dt, close in hist["Close"].items():
                 if dt.strftime("%Y-%m-%d") <= target:
-                    best = float(close)
+                    c = float(close)
+                    if math.isfinite(c):  # 過濾 NaN/inf，避免寫入試算表時 JSON 序列化失敗
+                        best = c
             if best is not None:
                 return best
         except Exception:
@@ -433,18 +466,15 @@ def _record_source(day: str, article: dict, push_count: int) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def main():
-    today = date.today()
+def _scrape_pinned(today_str: str) -> tuple:
+    """跑一次完整的置底文章爬取，回傳 (pinned, all_texts, push_total)。"""
     session = make_ptt_session()
-
-    # --- 步驟 1：爬置底文章 ---
-    print(f"[資訊] 爬取 PTT {BOARD} 板置底文章（{today.isoformat()}）...")
+    print(f"[資訊] 爬取 PTT {BOARD} 板置底文章（{today_str}）...")
     pinned = get_pinned_articles(session, BOARD)
     if not pinned:
         sys.exit("[結束] 沒有可分析的置底文章")
 
-    all_texts = []
-    push_total = 0
+    all_texts, push_total = [], 0
     for art in pinned:
         print(f"  抓取：{art['title']}")
         data = get_article_content(session, art["url"])
@@ -452,6 +482,29 @@ def main():
         all_texts.extend(data["pushes"])
         push_total += len(data["pushes"])
     print(f"[資訊] 共分析 {len(pinned)} 篇置底文章")
+    return pinned, all_texts, push_total
+
+
+def main():
+    today = date.today()
+
+    # --- 步驟 1：爬置底文章（外層重試：某些雲端主機的出口 IP 可能被 PTT
+    # 的防爬蟲規則在 TLS 層直接斷線，_mount_retry_adapter 處理的是單次連線的
+    # 立即重試；這裡再包一層「整個流程重來」、間隔拉長到 30 秒，讓重試橫跨
+    # 較長時間、更有機會避開節流窗口） ---
+    ATTEMPTS = 3
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            pinned, all_texts, push_total = _scrape_pinned(today.isoformat())
+            break
+        except requests.exceptions.RequestException as e:
+            print(f"[警告] 第 {attempt}/{ATTEMPTS} 次嘗試連線 PTT 失敗：{e}")
+            if attempt == ATTEMPTS:
+                sys.exit(
+                    "[錯誤] 連續多次無法連線 PTT，可能是目前執行環境的出口 IP "
+                    "被 PTT 的防爬蟲規則封鎖（常見於雲端主機／CI runner）。"
+                )
+            time.sleep(30)
 
     # 記錄今天的資料來源（PTT 文章連結）到 sources.json，供報告的參考資料使用
     _record_source(today.isoformat(), pinned[0], push_total)
