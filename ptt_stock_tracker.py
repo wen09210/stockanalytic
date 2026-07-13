@@ -556,7 +556,10 @@ def main():
             price = round(p, 2) if p is not None else "#N/A"
         stock_rows.append([
             today.isoformat(),   # 檢查日期 YYYY-MM-DD
-            s["code"],           # 股票代碼
+            # 股票代碼：前面加單引號強制存成文字，避免 Google Sheets 用
+            # value_input_option=USER_ENTERED 寫入時把 "0050" 這類前導零代碼
+            # 自動辨識成數字 50、吃掉前導零，導致之後查價對不到代碼
+            f"'{s['code']}",
             s["name"],           # 公司名稱
             s["mentions"],       # PTT 提及次數（熱門度）
             price,               # 收盤價（數值）或 GoogleFinance 公式

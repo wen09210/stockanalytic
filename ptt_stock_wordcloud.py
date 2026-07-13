@@ -396,6 +396,8 @@ def query_stock_prices(found_stocks: dict) -> list[dict]:
         print("[資訊] 文章中未偵測到上市櫃公司")
         return results
 
+    import math
+
     print("\n========== 偵測到的公司與最新收盤價 ==========")
     # 依提及次數由高到低處理
     ordered = sorted(found_stocks.items(), key=lambda x: -x[1][2])
@@ -407,13 +409,20 @@ def query_stock_prices(found_stocks: dict) -> list[dict]:
             if hist.empty:
                 print(f"  {name} ({symbol})：查無資料")
                 continue
-            closes = [float(c) for c in hist["Close"].tolist()]
+            # 過濾 NaN/inf 收盤價，避免報告顯示出字面上的「nan」；
+            # 日期與收盤價配對過濾，確保 date_str 對應到真正被採用的那筆收盤價
+            paired = [(dt, float(c)) for dt, c in hist["Close"].items()
+                      if math.isfinite(float(c))]
+            if not paired:
+                print(f"  {name} ({symbol})：收盤價皆為無效值，略過")
+                continue
+            closes = [c for _, c in paired]
             last_close = closes[-1]
             # 若有前一個交易日資料則計算漲跌幅
             change_pct = None
             if len(closes) >= 2:
                 change_pct = (last_close - closes[-2]) / closes[-2] * 100
-            date_str = hist.index[-1].strftime("%Y-%m-%d")
+            date_str = paired[-1][0].strftime("%Y-%m-%d")
             print(f"  {name} ({symbol})：收盤價 {last_close:.2f} 元（{date_str}）"
                   f"｜提及 {mentions} 次")
             results.append({

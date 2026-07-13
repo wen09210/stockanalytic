@@ -61,8 +61,13 @@ def main():
 
     # --- 逐日寫入日期分頁（存在就清空重寫，冪等）---
     for day in sorted(per_day):
+        # 股票代碼欄前面加單引號強制存成文字，避免 USER_ENTERED 把 "0050"
+        # 這類前導零代碼自動辨識成數字 50、吃掉前導零
+        stock_rows_protected = [
+            [row[0], f"'{row[1]}"] + row[2:] for row in per_day[day]["stocks"]
+        ]
         values = [["檢查日期", "股票代碼", "公司名稱", "PTT提及次數", "股價"]]
-        values += per_day[day]["stocks"]
+        values += stock_rows_protected
         values += [[], []]
         values += [["檢查日期", "排名", "詞彙", "出現次數"]]
         values += per_day[day]["words"]
