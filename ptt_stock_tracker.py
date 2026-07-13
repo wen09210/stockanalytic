@@ -240,10 +240,23 @@ def tokenize_and_count(texts: list[str]) -> Counter:
 
 
 def find_chinese_font() -> str:
-    """找出第一個存在的中文字型檔路徑。"""
+    """找出可用的中文字型檔路徑：先查候選清單，找不到再用萬用字元掃常見字型目錄。
+
+    後者是為了應付 Linux 發行版之間套件安裝路徑／檔名的細微差異
+    （例如 fonts-noto-cjk 在不同 Ubuntu 版本可能拆成多個檔案）。
+    """
+    import glob
     for path in FONT_CANDIDATES:
         if os.path.exists(path):
             return path
+    for pattern in (
+        "/usr/share/fonts/**/*CJK*",
+        "/usr/share/fonts/**/*NotoSansTC*",
+        "/usr/share/fonts/**/*WenQuanYi*",
+    ):
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            return matches[0]
     sys.exit("[錯誤] 找不到中文字型，請在 FONT_CANDIDATES 加入你電腦上的字型路徑")
 
 
