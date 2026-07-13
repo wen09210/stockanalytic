@@ -9,3 +9,4 @@ __pycache__/
 # 產出物（index.html 是發佈用快照，保留在版控內）
 wordcloud.png
 wordcloud_today.png
+wordcloud_*.png

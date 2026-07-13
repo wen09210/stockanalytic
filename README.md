@@ -10,11 +10,13 @@
 
 | 檔案 | 用途 |
 |------|------|
-| `ptt_stock_wordcloud.py` | 爬 PTT 置底文（排除公告）→ 文字雲 → 股價/走勢 → 產生 `report.html` |
-| `ptt_stock_tracker.py` | 每日追蹤版：分析結果 Append 到 Google 試算表（股票追蹤、熱門詞彙兩分頁） |
-| `report_from_sheet.py` | 反向流程：從 Google 試算表讀資料重建 HTML 報告（支援指定日期回放） |
+| `ptt_stock_wordcloud.py` | 爬 PTT 置底文（排除公告）→ 詞彙分類 → 文字雲（僅股票相關詞）→ 產生 `report_live.html` |
+| `ptt_stock_tracker.py` | 每日追蹤版：結果寫入 Google 試算表中「以日期命名的分頁」（同日重跑清空重寫） |
+| `report_from_sheet.py` | 從 Google 試算表讀資料，產生每日報告 `report_日期.html` + 分頁器 `report.html` |
 | `sheet_export.csv` | 試算表的本地匯出檔（無 `credentials.json` 時的資料來源） |
-| `index.html` | 發佈到 GitHub Pages 的報告快照 |
+| `report.html` / `index.html` | 分頁器首頁：日期頁籤切換各日報告（index 為 Pages 發佈版） |
+
+報告中的詞彙會分成「股票相關」（公司名、股市詞彙表、含股/盤/漲/跌等字）與「其他話題」兩區，只有股票相關詞會進文字雲。
 
 ## 安裝
 
@@ -28,16 +30,16 @@ python3 -m venv .venv
 ## 使用
 
 ```bash
-# 產生今日報告（爬 PTT → report.html + wordcloud.png）
+# 產生即時報告（爬 PTT → report_live.html + wordcloud.png）
 .venv/bin/python ptt_stock_wordcloud.py
 
-# 記錄到 Google 試算表（需 credentials.json，否則為乾跑模式）
+# 記錄到 Google 試算表的日期分頁（需 credentials.json，否則為乾跑模式）
 .venv/bin/python ptt_stock_tracker.py
 
-# 從試算表資料重建報告（可指定日期）
-.venv/bin/python report_from_sheet.py 2026-07-13
+# 從試算表資料產生各日報告 + 分頁器 report.html
+.venv/bin/python report_from_sheet.py
 
-# 本機預覽報告
+# 本機預覽
 python3 -m http.server 8791   # 然後開 http://127.0.0.1:8791/report.html
 ```
 
@@ -47,7 +49,7 @@ python3 -m http.server 8791   # 然後開 http://127.0.0.1:8791/report.html
 2. 建立**服務帳戶**，下載 JSON 金鑰改名 `credentials.json` 放到專案根目錄（已被 `.gitignore` 排除，勿 commit）
 3. 把金鑰內的 `client_email` 加入試算表「PTT股市熱門標的追蹤」的共用名單（編輯者）
 
-寫入格式：`檢查日期 | 股票代碼 | 公司名稱 | PTT提及次數 | =GOOGLEFINANCE("TPE:代碼")`。
+寫入方式：**同一份試算表、每天一個以日期命名的分頁**（例如 `2026-07-13`），分頁內上半部為熱門標的（`檢查日期 | 代碼 | 公司 | 提及次數 | 股價公式`）、下半部為高頻詞 Top 20。同一天重跑會清空該分頁重寫，不會產生重複資料。
 
 ## 已知限制
 
@@ -60,5 +62,5 @@ GitHub Pages 採 **deploy from branch**（`main` / root）。更新報告後：
 
 ```bash
 cp report.html index.html
-git add index.html && git commit -m "更新報告" && git push
+git add index.html report_*.html && git commit -m "更新報告" && git push
 ```

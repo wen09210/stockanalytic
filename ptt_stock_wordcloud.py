@@ -36,7 +36,8 @@ import yfinance as yf
 PTT_BASE = "https://www.ptt.cc"
 BOARD = "Stock"                          # 要爬的看板名稱
 WORDCLOUD_OUTPUT = "wordcloud.png"       # 文字雲輸出檔名
-REPORT_OUTPUT = "report.html"            # HTML 網頁報告輸出檔名
+REPORT_OUTPUT = "report_live.html"       # HTML 網頁報告輸出檔名
+                                         # （report.html 保留給分頁器首頁，避免互相覆蓋）
 TOP_N_WORDS = 200                        # 文字雲最多顯示的詞數
 EXCLUDE_TITLE_KEYWORDS = ["[公告]"]      # 標題含這些關鍵字的置底文不分析（可自行增減）
 
@@ -61,6 +62,39 @@ AMBIGUOUS_COMPANY_NAMES = {
     "安心", "精華", "大將", "聯發", "全台", "萬在", "大樹", "統一",
     "華電", "美亞", "正文", "力士", "熱映",
 }
+
+# ---- 股票相關詞彙判斷 ----
+# 只要詞中含有這些「字」就視為股市相關（股、盤、漲、跌、噴＝股板行情用語）
+STOCK_TERM_CHARS = "股盤漲跌噴崩"
+# 不含上述字但仍屬股市用語的完整詞（可自行擴充）
+STOCK_TERM_WORDS = {
+    "台指", "富台", "小台", "大台", "期貨", "選擇權", "權證", "ETF", "etf",
+    "外資", "投信", "自營商", "法人", "主力", "散戶", "韭菜", "大戶",
+    "財報", "營收", "法說", "除權", "除息", "配息", "殖利率", "本益比",
+    "融資", "融券", "當沖", "隔日沖", "停損", "停利", "套牢", "解套",
+    "抄底", "追高", "殺低", "多單", "空單", "空軍", "多軍", "做多", "做空",
+    "開高", "開低", "收紅", "收黑", "熔斷", "大盤", "指數", "行情",
+    "賭場", "航運", "半導體", "電子", "金融", "台積", "現貨", "零股",
+    "市場", "交易", "持股", "買進", "賣出", "進場", "出場", "獲利", "損益",
+    "tw", "TW",
+}
+
+
+def classify_words(word_freq: Counter, extra_related=()) -> tuple:
+    """把詞頻分成（股票相關, 不相關）兩個 Counter。
+
+    判斷順序：公司名稱等額外清單 → 股市詞彙表 → 含股市關鍵字元。
+    """
+    extra = set(extra_related)
+    related, unrelated = Counter(), Counter()
+    for word, freq in word_freq.items():
+        if (word in extra or word in STOCK_TERM_WORDS
+                or any(ch in word for ch in STOCK_TERM_CHARS)):
+            related[word] = freq
+        else:
+            unrelated[word] = freq
+    return related, unrelated
+
 
 # 可能的中文字型路徑（由上往下找，找到第一個存在的就用）
 # macOS 內建：蘋方、黑體-繁；Windows：微軟正黑體；Linux：Noto CJK
@@ -394,9 +428,12 @@ def generate_html_report(
     stock_results: list[dict],
     wordcloud_path: str,
     output_path: str,
+    unrelated_words: Counter = None,
 ) -> None:
     """把文字雲圖片與偵測到的股票整合成一頁深色交易平台風格的 HTML 報告。
 
+    word_freq 應傳入「股票相關」詞頻（文字雲的內容）；
+    unrelated_words 傳入被過濾掉的其他話題詞，會另列一區、不進文字雲。
     文字雲圖片以 base64 內嵌，報告為單一檔案、可直接用瀏覽器開啟或分享。
     """
     import base64
@@ -419,11 +456,24 @@ def generate_html_report(
         for a in articles
     )
 
-    # --- 高頻詞 Top 20 標籤 ---
+    # --- 高頻詞 Top 20 標籤（股票相關，綠色）---
     top_words = "\n".join(
         f'<span class="tag">{word} <b>{freq}</b></span>'
         for word, freq in word_freq.most_common(20)
     )
+
+    # --- 不相關詞標籤（灰色，另列一區、不進文字雲）---
+    offtopic_card = ""
+    if unrelated_words:
+        offtopic_tags = "\n".join(
+            f'<span class="tag dim">{word} <b>{freq}</b></span>'
+            for word, freq in unrelated_words.most_common(20)
+        )
+        offtopic_card = f"""
+  <div class="card">
+    <h2>Off-topic — 其他話題（未列入文字雲）</h2>
+    {offtopic_tags}
+  </div>"""
 
     def chg_pill(pct) -> str:
         """漲跌幅膠囊標籤：台股慣例紅漲綠跌，平盤灰色。"""
@@ -540,6 +590,11 @@ def generate_html_report(
     padding: 2px 12px; margin: 3px; font-size: .85rem; color: #d1d4dc;
   }}
   .tag b {{ color: #2ebd85; }}
+  .tag.dim {{
+    background: rgba(132,142,156,.08); border-color: rgba(132,142,156,.25);
+    color: #848e9c;
+  }}
+  .tag.dim b {{ color: #848e9c; }}
   /* --- 表格 --- */
   .tablewrap {{ overflow-x: auto; }}
   table {{ width: 100%; border-collapse: collapse; font-size: .9rem; }}
@@ -584,14 +639,15 @@ def generate_html_report(
   </div>
 
   <div class="card">
-    <h2>Word Cloud — 今日話題</h2>
+    <h2>Word Cloud — 股票相關話題</h2>
     {img_tag}
   </div>
 
   <div class="card">
-    <h2>Trending — 高頻詞 Top 20</h2>
+    <h2>Trending — 股票相關高頻詞 Top 20</h2>
     {top_words}
   </div>
+{offtopic_card}
 
   <div class="card">
     <h2>Sources — 資料來源</h2>
@@ -628,16 +684,18 @@ def main():
     # --- 步驟 2：斷詞與詞頻統計 ---
     print("[資訊] 進行 jieba 斷詞與詞頻統計...")
     word_freq = tokenize_and_count(all_texts)
-    print(f"[資訊] 有效詞彙數：{len(word_freq)}，前 10 高頻詞：")
-    for word, freq in word_freq.most_common(10):
-        print(f"    {word}: {freq}")
 
-    # --- 步驟 3：繪製文字雲 ---
-    draw_wordcloud(word_freq, WORDCLOUD_OUTPUT)
-
-    # --- 步驟 4：偵測公司並查股價 ---
+    # --- 步驟 3：載入股票清單、把詞分成「股票相關 / 不相關」---
     print("[資訊] 載入台股上市櫃公司清單...")
     stock_map = fetch_tw_stock_list()
+    related, unrelated = classify_words(word_freq, extra_related=stock_map.keys())
+    print(f"[資訊] 詞彙 {len(word_freq)} 個 → 股票相關 {len(related)}、"
+          f"不相關 {len(unrelated)}")
+    print("    相關前 5：", "、".join(f"{w}({c})" for w, c in related.most_common(5)))
+    print("    不相關前 5：", "、".join(f"{w}({c})" for w, c in unrelated.most_common(5)))
+
+    # --- 步驟 4：文字雲（只用股票相關詞）+ 偵測公司查股價 ---
+    draw_wordcloud(related, WORDCLOUD_OUTPUT)
     found = detect_stocks(all_texts, stock_map)
     stock_results = query_stock_prices(found)
 
@@ -645,10 +703,11 @@ def main():
     generate_html_report(
         board=BOARD,
         articles=pinned,
-        word_freq=word_freq,
+        word_freq=related,
         stock_results=stock_results,
         wordcloud_path=WORDCLOUD_OUTPUT,
         output_path=REPORT_OUTPUT,
+        unrelated_words=unrelated,
     )
 
 

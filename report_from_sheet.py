@@ -22,6 +22,7 @@
 
 import csv
 import os
+import re
 import sys
 from collections import Counter
 
@@ -34,7 +35,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")
 CSV_FALLBACK = os.path.join(BASE_DIR, "sheet_export.csv")
 SPREADSHEET_NAME = "PTT股市熱門標的追蹤"
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1G8vxy9pjASnoSN6SzO_qWyOJQ8fIRtBwi6EMhTw64Pw/edit"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1B3rQufouHb6n9z2yTvBpIeFK_Uxv1TcxcimXIGsED1s/edit"
 WORDCLOUD_OUTPUT = os.path.join(BASE_DIR, "wordcloud.png")
 REPORT_OUTPUT = os.path.join(BASE_DIR, "report.html")
 
@@ -54,9 +55,15 @@ def load_rows() -> list[list[str]]:
         ]
         creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
         client = gspread.authorize(creds)
-        ws = client.open(SPREADSHEET_NAME).sheet1
-        print(f"[資訊] 從線上試算表「{SPREADSHEET_NAME}」讀取資料")
-        return ws.get_all_values()
+        spreadsheet = client.open(SPREADSHEET_NAME)
+        # 合併所有分頁的內容：新版是「每天一個日期分頁」，
+        # 舊版（單一分頁、日期在欄位裡）也相容——反正每列都帶檢查日期
+        rows = []
+        for ws in spreadsheet.worksheets():
+            rows.extend(ws.get_all_values())
+        print(f"[資訊] 從線上試算表「{SPREADSHEET_NAME}」讀取 "
+              f"{len(spreadsheet.worksheets())} 個分頁")
+        return rows
 
     if not os.path.exists(CSV_FALLBACK):
         sys.exit(
@@ -119,20 +126,39 @@ def parse_sheet(rows: list[list[str]], target_date) -> tuple:
 # ---------------------------------------------------------------------------
 # 補上 yfinance 股價與走勢，組成報告需要的資料結構
 # ---------------------------------------------------------------------------
-def enrich_with_prices(stocks: list[dict]) -> list[dict]:
-    """為每檔股票補上近一月收盤序列、最新價與漲跌幅（同時試 .TW 與 .TWO）。"""
+_history_cache: dict = {}  # code -> [(YYYY-MM-DD, close), ...]，避免重複查詢
+
+
+def _get_history(code: str):
+    """抓該股票近兩個月的日收盤序列（.TW 失敗改試 .TWO），並快取。"""
+    if code in _history_cache:
+        return _history_cache[code]
+    result = (None, [])
+    for suffix in (".TW", ".TWO"):
+        try:
+            hist = yf.Ticker(code + suffix).history(period="2mo")
+            if not hist.empty:
+                closes = [
+                    (d.strftime("%Y-%m-%d"), float(c))
+                    for d, c in hist["Close"].items()
+                ]
+                result = (code + suffix, closes)
+                break
+        except Exception:
+            continue
+    _history_cache[code] = result
+    return result
+
+
+def enrich_with_prices(stocks: list[dict], day: str) -> list[dict]:
+    """為每檔股票補上「截至檢查日」的收盤序列、當日價與漲跌幅。
+
+    走勢圖只畫到檢查日為止，才不會出現「7/10 的報告畫到 7/13 的走勢」。
+    """
     results = []
     for s in sorted(stocks, key=lambda x: -x["mentions"]):
-        closes, symbol = [], None
-        for suffix in (".TW", ".TWO"):  # 先試上市再試上櫃
-            try:
-                hist = yf.Ticker(s["code"] + suffix).history(period="1mo")
-                if not hist.empty:
-                    closes = [float(c) for c in hist["Close"].tolist()]
-                    symbol = s["code"] + suffix
-                    break
-            except Exception:
-                continue
+        symbol, all_closes = _get_history(s["code"])
+        closes = [c for d, c in all_closes if d <= day][-22:]  # 截至當日約一個月
         if not closes:
             print(f"  {s['name']}({s['code']})：查無股價，略過")
             continue
@@ -141,38 +167,114 @@ def enrich_with_prices(stocks: list[dict]) -> list[dict]:
             change_pct = (closes[-1] - closes[-2]) / closes[-2] * 100
         results.append({
             "name": s["name"], "symbol": symbol, "price": closes[-1],
-            "change_pct": change_pct, "date": "", "mentions": s["mentions"],
+            "change_pct": change_pct, "date": day, "mentions": s["mentions"],
             "closes": closes,
         })
-        print(f"  {s['name']}({symbol})：{closes[-1]:.2f} 元｜提及 {s['mentions']} 次")
     return results
 
 
-def main():
-    target_date = sys.argv[1] if len(sys.argv) > 1 else None
-    rows = load_rows()
-    day, stocks, word_freq = parse_sheet(rows, target_date)
-    print(f"[資訊] 使用 {day} 的資料：{len(stocks)} 檔股票、{len(word_freq)} 個詞")
-
-    # 文字雲（試算表只存 Top 20 詞，雲會比即時爬蟲版稀疏一些）
-    wc.draw_wordcloud(word_freq, WORDCLOUD_OUTPUT)
-
-    # 補股價與走勢
-    print("[資訊] 透過 yfinance 補上股價與近一月走勢...")
-    stock_results = enrich_with_prices(stocks)
-    for r in stock_results:
-        r["date"] = day  # 表格日期欄顯示資料所屬日
-
-    # 產生報告（資料來源卡片指向 Google 試算表）
-    articles = [{"title": f"Google 試算表：{SPREADSHEET_NAME}（{day}）", "url": SHEET_URL}]
-    wc.generate_html_report(
-        board=wc.BOARD,
-        articles=articles,
-        word_freq=word_freq,
-        stock_results=stock_results,
-        wordcloud_path=WORDCLOUD_OUTPUT,
-        output_path=REPORT_OUTPUT,
+# ---------------------------------------------------------------------------
+# 分頁器首頁：日期頁籤 + iframe 載入各日報告
+# ---------------------------------------------------------------------------
+def write_tabbed_index(days: list, output_path: str) -> None:
+    """產生分頁器頁面：上方日期頁籤、下方 iframe 顯示選中日期的報告。"""
+    tabs = "".join(
+        f'<button class="tab{" active" if i == len(days) - 1 else ""}" '
+        f'data-src="report_{d}.html">{d}</button>'
+        for i, d in enumerate(days)
     )
+    latest = days[-1]
+    html = f"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTT Stock 熱門標的追蹤（每日）</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; }}
+  body {{
+    height: 100vh; display: flex; flex-direction: column;
+    background: #131722; color: #d1d4dc;
+    font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+  }}
+  .tabbar {{
+    display: flex; align-items: center; gap: 6px; padding: 10px 16px;
+    border-bottom: 1px solid #2a2e39; flex-wrap: wrap;
+  }}
+  .brand {{
+    font-weight: 700; letter-spacing: .1em; color: #eaecef;
+    margin-right: 12px; font-size: .95rem;
+  }}
+  .tab {{
+    background: #1c2230; color: #848e9c; border: 1px solid #2a2e39;
+    border-radius: 8px; padding: 6px 16px; font-size: .85rem; cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }}
+  .tab:hover {{ color: #eaecef; border-color: #4a5568; }}
+  .tab.active {{ background: #2ebd85; border-color: #2ebd85; color: #0b0e14; font-weight: 700; }}
+  iframe {{ flex: 1; border: 0; width: 100%; background: #131722; }}
+</style>
+</head>
+<body>
+  <div class="tabbar">
+    <span class="brand">📈 PTT STOCK 每日追蹤</span>
+    {tabs}
+  </div>
+  <iframe id="frame" src="report_{latest}.html"></iframe>
+<script>
+  document.querySelectorAll(".tab").forEach(btn => {{
+    btn.addEventListener("click", () => {{
+      document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("frame").src = btn.dataset.src;
+    }});
+  }});
+</script>
+</body>
+</html>"""
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[完成] 分頁器首頁已儲存至 {output_path}")
+
+
+def main():
+    rows = load_rows()
+
+    # 解析出所有日期（parse_sheet 一次取一天，先掃出全部日期清單）
+    all_days = sorted({
+        cells[0].strip() for cells in rows
+        if cells and re.fullmatch(r"\d{4}-\d{2}-\d{2}", cells[0].strip())
+    })
+    print(f"[資訊] 試算表內共有 {len(all_days)} 天資料：{', '.join(all_days)}")
+
+    for day in all_days:
+        _, stocks, word_freq = parse_sheet(rows, day)
+
+        # 詞彙分類：股票相關進文字雲，不相關另列一區
+        stock_names = [s["name"] for s in stocks]
+        related, unrelated = wc.classify_words(word_freq, extra_related=stock_names)
+        print(f"\n=== {day}：{len(stocks)} 檔股票｜詞彙 相關 {len(related)}、"
+              f"不相關 {len(unrelated)} ===")
+
+        # 每天各自的文字雲與報告檔
+        wc_path = os.path.join(BASE_DIR, f"wordcloud_{day}.png")
+        report_path = os.path.join(BASE_DIR, f"report_{day}.html")
+        wc.draw_wordcloud(related, wc_path)
+
+        stock_results = enrich_with_prices(stocks, day)
+        articles = [{"title": f"Google 試算表：{SPREADSHEET_NAME}（{day}）", "url": SHEET_URL}]
+        wc.generate_html_report(
+            board=wc.BOARD,
+            articles=articles,
+            word_freq=related,
+            stock_results=stock_results,
+            wordcloud_path=wc_path,
+            output_path=report_path,
+            unrelated_words=unrelated,
+        )
+
+    # 分頁器首頁（預設顯示最新一天）
+    write_tabbed_index(all_days, REPORT_OUTPUT)
 
 
 if __name__ == "__main__":
