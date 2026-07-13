@@ -297,6 +297,7 @@ def fetch_tw_stock_list() -> dict:
         for mode, market in sources:
             url = f"https://isin.twse.com.tw/isin/C_public.jsp?strMode={mode}"
             resp = session.get(url, timeout=20)
+            resp.raise_for_status()  # 錯誤頁（403/503...）要能被下面 except 攔到並改用備援清單
             resp.encoding = "big5"  # 該頁為 Big5 編碼
             soup = BeautifulSoup(resp.text, "html.parser")
             for row in soup.select("table.h4 tr"):
@@ -310,6 +311,10 @@ def fetch_tw_stock_list() -> dict:
                 code, name = parts[0].strip(), parts[1].strip()
                 if re.fullmatch(r"\d{4}", code):  # 只留 4 位數一般股票
                     stock_map[name] = (code, market)
+        if not stock_map:
+            # HTTP 狀態碼正常，但一筆都沒解析到 —— 通常是頁面結構被攔截頁取代，
+            # 主動視為失敗走備援清單，而不是讓後面流程在空清單上默默失敗
+            raise requests.RequestException("回應中解析不到任何股票資料（可能被導向攔截頁）")
         print(f"[資訊] 已載入 {len(stock_map)} 檔上市櫃股票清單")
     except requests.RequestException as e:
         print(f"[警告] 無法取得證交所清單（{e}），改用內建小清單")
