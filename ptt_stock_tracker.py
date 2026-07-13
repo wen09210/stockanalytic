@@ -78,12 +78,12 @@ SPREADSHEET_NAME = "PTT股市熱門標的追蹤"    # 你的 Google 試算表「
 # 同一天重跑會清空該分頁重寫（冪等），不會產生重複資料或新檔案
 TOP_WORDS_TO_SHEET = 20                    # 每天記錄前幾名高頻詞
 
-# 股價公式模式：
-#   False → 即時公式 =GOOGLEFINANCE("TPE:2330")
-#           注意：這是「即時價」，日後打開試算表看到的是當下最新價格
-#   True  → 凍結在檢查日期的收盤價
-#           =INDEX(GOOGLEFINANCE("TPE:2330","close",DATE(y,m,d)),2,2)
-USE_HISTORICAL_CLOSE = False
+# 股價寫入方式：
+#   USE_GOOGLEFINANCE = False（預設）→ 用 yfinance 寫入「檢查日收盤價」的固定數值，
+#       涵蓋上市＋上櫃，不會有 #N/A，數字凍結不漂移。
+#   USE_GOOGLEFINANCE = True → 改寫 GOOGLEFINANCE 公式（僅涵蓋上市，上櫃會 #N/A）。
+USE_GOOGLEFINANCE = False
+USE_HISTORICAL_CLOSE = False   # 僅在 USE_GOOGLEFINANCE=True 時有效（見 build_price_formula）
 
 # 常見中文停用詞（可自行擴充）
 STOPWORDS = {
@@ -321,20 +321,42 @@ def count_stock_mentions(texts: list[str], stock_map: dict) -> list[dict]:
 # 4. 寫入 Google Sheets
 # ---------------------------------------------------------------------------
 def build_price_formula(code: str, check_date: date) -> str:
-    """產生 GoogleFinance 股價公式字串。
+    """產生 GoogleFinance 股價公式字串（僅在 USE_GOOGLEFINANCE=True 時使用）。
 
     注意：GOOGLEFINANCE 的 "TPE:" 前綴只涵蓋台灣「上市」股票，
-    上櫃（TPEx）標的多半抓不到、會顯示 #N/A。
+    上櫃（TPEx）標的多半抓不到、會顯示 #N/A。預設改用 yfinance 靜態收盤價
+    （見 fetch_close_price），涵蓋上市＋上櫃。
     """
     if USE_HISTORICAL_CLOSE:
-        # 凍結在檢查日期的收盤價（日後打開試算表數字不會變動）
         d = check_date
         return (
             f'=INDEX(GOOGLEFINANCE("TPE:{code}","close",'
             f'DATE({d.year},{d.month},{d.day})),2,2)'
         )
-    # 即時價（每次打開試算表都會更新成最新價格）
     return f'=GOOGLEFINANCE("TPE:{code}")'
+
+
+def fetch_close_price(code: str, check_date: date):
+    """用 yfinance 取「檢查日（含）以前最近交易日」的收盤價（涵蓋上市 .TW 與上櫃 .TWO）。
+
+    回傳浮點數；查不到回傳 None。寫成固定數值，數字不會隨時間漂移。
+    """
+    import yfinance as yf
+    target = check_date.isoformat()
+    for suffix in (".TW", ".TWO"):  # 先試上市再試上櫃
+        try:
+            hist = yf.Ticker(code + suffix).history(start="2026-06-01")
+            if hist.empty:
+                continue
+            best = None
+            for dt, close in hist["Close"].items():
+                if dt.strftime("%Y-%m-%d") <= target:
+                    best = float(close)
+            if best is not None:
+                return best
+        except Exception:
+            continue
+    return None
 
 
 def write_to_google_sheets(stock_rows: list[list], word_rows: list[list],
@@ -453,16 +475,21 @@ def main():
         print(f"  {s['name']}({s['code']}, {s['market']})：提及 {s['mentions']} 次")
 
     # --- 步驟 4：組資料列並寫入 Google Sheets ---
-    stock_rows = [
-        [
-            today.isoformat(),                       # 檢查日期 YYYY-MM-DD
-            s["code"],                               # 股票代碼
-            s["name"],                               # 公司名稱
-            s["mentions"],                           # PTT 提及次數（熱門度）
-            build_price_formula(s["code"], today),   # GoogleFinance 股價公式
-        ]
-        for s in hot_stocks
-    ]
+    print("[資訊] 查詢各標的收盤價（yfinance，涵蓋上市＋上櫃）...")
+    stock_rows = []
+    for s in hot_stocks:
+        if USE_GOOGLEFINANCE:
+            price = build_price_formula(s["code"], today)   # 寫公式（僅上市）
+        else:
+            p = fetch_close_price(s["code"], today)         # 寫固定數值（含上櫃）
+            price = round(p, 2) if p is not None else "#N/A"
+        stock_rows.append([
+            today.isoformat(),   # 檢查日期 YYYY-MM-DD
+            s["code"],           # 股票代碼
+            s["name"],           # 公司名稱
+            s["mentions"],       # PTT 提及次數（熱門度）
+            price,               # 收盤價（數值）或 GoogleFinance 公式
+        ])
     word_rows = [
         [today.isoformat(), rank, word, freq]
         for rank, (word, freq) in enumerate(

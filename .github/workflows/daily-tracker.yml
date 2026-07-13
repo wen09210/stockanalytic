@@ -1,0 +1,52 @@
+name: PTT 每日追蹤（自動排程）
+
+on:
+  schedule:
+    # 台灣時間每天凌晨 0:00 = UTC 前一天 16:00
+    - cron: '0 16 * * *'
+  workflow_dispatch: {}  # 允許在 GitHub Actions 頁面手動點「Run workflow」測試
+
+# 讓 GITHUB_TOKEN 有權限把更新的報告 commit 回這個 repo
+permissions:
+  contents: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 設定 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'  # 3.10+ 才有 cryptography 的預編譯 wheel
+
+      - name: 安裝套件
+        run: pip install -r requirements.txt
+
+      - name: 還原 Google 服務帳戶憑證
+        # GCP_CREDENTIALS_B64 是存在 repo Secrets 裡的 base64 字串，
+        # 這裡還原成執行期需要的 credentials.json（不會被 commit，job 結束即銷毀）
+        run: echo "${{ secrets.GCP_CREDENTIALS_B64 }}" | base64 -d > credentials.json
+
+      - name: 爬 PTT 並寫入 Google 試算表
+        run: python ptt_stock_tracker.py
+
+      - name: 從試算表重建分頁器報告
+        run: python report_from_sheet.py
+
+      - name: 更新 index.html（GitHub Pages 首頁）
+        run: cp report.html index.html
+
+      - name: 清除本機憑證檔（不留在 workspace）
+        if: always()
+        run: rm -f credentials.json
+
+      - name: Commit 並推送更新的報告
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html report.html report_*.html sheet_export.csv sources.json
+          git diff --staged --quiet || git commit -m "自動更新每日報告 $(date -u +%Y-%m-%d)"
+          git push
