@@ -334,6 +334,9 @@ def fetch_tw_stock_list() -> dict:
                 if len(parts) != 2:
                     continue
                 code, name = parts[0].strip(), parts[1].strip()
+                # 證交所名稱有時帶尾碼「*」（標示面額非十元），但鄉民打字不會打這個
+                # 符號，不去掉的話這類股票永遠無法用名稱比對命中（只能靠代碼數字比對）
+                name = name.rstrip("*").strip()
                 # 只保留 4 位數字的一般股票代碼（排除權證、ETF 以外的特殊商品可自行調整）
                 if re.fullmatch(r"\d{4}", code):
                     stock_map[name] = (code, suffix)
