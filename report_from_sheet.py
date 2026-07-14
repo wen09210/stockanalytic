@@ -175,16 +175,21 @@ def enrich_with_prices(stocks: list[dict], day: str) -> list[dict]:
     results = []
     for s in sorted(stocks, key=lambda x: -x["mentions"]):
         symbol, all_closes = _get_history(s["code"])
-        closes = [c for d, c in all_closes if d <= day][-22:]  # 截至當日約一個月
-        if not closes:
+        # 保留（日期, 收盤價）配對，才能標示出這筆收盤價「真正」的交易日
+        paired = [(d, c) for d, c in all_closes if d <= day][-22:]  # 截至當日約一個月
+        if not paired:
             print(f"  {s['name']}({s['code']})：查無股價，略過")
             continue
+        closes = [c for _, c in paired]
+        # 顯示日期取實際收盤日，而非檢查日：檢查日若逢週末/國定假日，
+        # 收盤價會是前一個交易日的，日期就該標成那個交易日，避免誤標
+        close_date = paired[-1][0]
         change_pct = None
         if len(closes) >= 2:
             change_pct = (closes[-1] - closes[-2]) / closes[-2] * 100
         results.append({
             "name": s["name"], "symbol": symbol, "price": closes[-1],
-            "change_pct": change_pct, "date": day, "mentions": s["mentions"],
+            "change_pct": change_pct, "date": close_date, "mentions": s["mentions"],
             "closes": closes,
         })
     return results
