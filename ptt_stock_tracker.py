@@ -71,7 +71,6 @@ EXCLUDE_TITLE_KEYWORDS = ["[公告]"]        # 標題含這些關鍵字的置底
 # 工作目錄不同而找不到檔案
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORDCLOUD_OUTPUT = os.path.join(BASE_DIR, "wordcloud_today.png")  # 文字雲輸出
-TOP_N_WORDS = 200                          # 文字雲最多顯示詞數
 MIN_MENTIONS = 1                           # 提及次數低於此值的股票不寫入試算表
 
 # --- Google Sheets 設定 ---
@@ -79,7 +78,6 @@ CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")  # Service Account
 SPREADSHEET_NAME = "PTT股市熱門標的追蹤"    # 你的 Google 試算表「名稱」
 # 每天的資料寫入「以日期命名的分頁」（例如 2026-07-13），永遠用同一份試算表；
 # 同一天重跑會清空該分頁重寫（冪等），不會產生重複資料或新檔案
-TOP_WORDS_TO_SHEET = 20                    # 每天記錄前幾名高頻詞
 
 # 股價寫入方式：
 #   USE_GOOGLEFINANCE = False（預設）→ 用 yfinance 寫入「檢查日收盤價」的固定數值，
@@ -268,7 +266,7 @@ def draw_wordcloud(word_freq: Counter, output_path: str) -> None:
     font_path = find_chinese_font()
     wc = WordCloud(
         font_path=font_path, width=1200, height=800,
-        background_color="white", max_words=TOP_N_WORDS, colormap="tab10",
+        background_color="white", max_words=len(word_freq), colormap="tab10",
     ).generate_from_frequencies(word_freq)
 
     plt.figure(figsize=(12, 8))
@@ -454,12 +452,17 @@ def write_to_google_sheets(stock_rows: list[list], word_rows: list[list],
             "加入試算表的共用名單（編輯者權限）"
         )
 
+    # 分頁列數需能容納完整詞頻清單（不再只留前 20 名），抓實際列數加緩衝
+    needed_rows = len(values) + 10
+
     # 取得（或建立）以日期命名的分頁；已存在就先清空，確保同日重跑冪等
     try:
         ws = spreadsheet.worksheet(day)
         ws.clear()
+        if ws.row_count < needed_rows:
+            ws.resize(rows=needed_rows)
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=day, rows=200, cols=10)
+        ws = spreadsheet.add_worksheet(title=day, rows=needed_rows, cols=10)
 
     # USER_ENTERED 讓 =GOOGLEFINANCE(...) 被當成公式而非文字
     ws.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
@@ -566,9 +569,7 @@ def main():
         ])
     word_rows = [
         [today.isoformat(), rank, word, freq]
-        for rank, (word, freq) in enumerate(
-            word_freq.most_common(TOP_WORDS_TO_SHEET), start=1
-        )
+        for rank, (word, freq) in enumerate(word_freq.most_common(), start=1)
     ]
     write_to_google_sheets(stock_rows, word_rows, day=today.isoformat())
 
