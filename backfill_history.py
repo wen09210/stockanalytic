@@ -90,7 +90,10 @@ def main():
         hot = t.count_stock_mentions(texts, stock_map)
         per_day[day] = {
             "stocks": [(s["code"], s["name"], s["mentions"]) for s in hot],
-            "words": [(i, w, c) for i, (w, c) in enumerate(word_freq.most_common(), 1)],
+            "words": [
+                (i, w, c) for i, (w, c) in enumerate(word_freq.most_common(), 1)
+                if c >= t.MIN_WORD_FREQ_TO_SHEET
+            ],
         }
         sources[day] = {"title": title, "url": url, "pushes": n_push}
         print(f"{day}｜{title}｜採計 {n_push} 則推文｜"
