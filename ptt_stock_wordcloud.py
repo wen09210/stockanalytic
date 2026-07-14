@@ -41,6 +41,7 @@ WORDCLOUD_OUTPUT = "wordcloud.png"       # 文字雲輸出檔名
 REPORT_OUTPUT = "report_live.html"       # HTML 網頁報告輸出檔名
                                          # （report.html 保留給分頁器首頁，避免互相覆蓋）
 EXCLUDE_TITLE_KEYWORDS = ["[公告]"]      # 標題含這些關鍵字的置底文不分析（可自行增減）
+MIN_WORD_FREQ = 5                        # 報告只顯示出現次數 >= 此值的字詞（濾掉只出現一兩次的雜訊詞）
 
 # 常見中文停用詞（可自行擴充，或改成讀取外部停用詞檔）
 STOPWORDS = {
@@ -81,14 +82,18 @@ STOCK_TERM_WORDS = {
 }
 
 
-def classify_words(word_freq: Counter, extra_related=()) -> tuple:
+def classify_words(word_freq: Counter, extra_related=(),
+                    min_freq: int = MIN_WORD_FREQ) -> tuple:
     """把詞頻分成（股票相關, 不相關）兩個 Counter。
 
     判斷順序：公司名稱等額外清單 → 股市詞彙表 → 含股市關鍵字元。
+    出現次數 < min_freq 的字詞視為雜訊，直接濾掉、不會進報告。
     """
     extra = set(extra_related)
     related, unrelated = Counter(), Counter()
     for word, freq in word_freq.items():
+        if freq < min_freq:
+            continue
         if (word in extra or word in STOCK_TERM_WORDS
                 or any(ch in word for ch in STOCK_TERM_CHARS)):
             related[word] = freq
@@ -329,6 +334,9 @@ def fetch_tw_stock_list() -> dict:
                 if len(parts) != 2:
                     continue
                 code, name = parts[0].strip(), parts[1].strip()
+                # 證交所名稱有時帶尾碼「*」（標示面額非十元），但鄉民打字不會打這個
+                # 符號，不去掉的話這類股票永遠無法用名稱比對命中（只能靠代碼數字比對）
+                name = name.rstrip("*").strip()
                 # 只保留 4 位數字的一般股票代碼（排除權證、ETF 以外的特殊商品可自行調整）
                 if re.fullmatch(r"\d{4}", code):
                     stock_map[name] = (code, suffix)

@@ -72,6 +72,7 @@ EXCLUDE_TITLE_KEYWORDS = ["[公告]"]        # 標題含這些關鍵字的置底
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORDCLOUD_OUTPUT = os.path.join(BASE_DIR, "wordcloud_today.png")  # 文字雲輸出
 MIN_MENTIONS = 1                           # 提及次數低於此值的股票不寫入試算表
+MIN_WORD_FREQ_TO_SHEET = 5                 # 出現次數低於此值的字詞視為雜訊，不寫入試算表
 
 # --- Google Sheets 設定 ---
 CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")  # Service Account 憑證檔
@@ -307,6 +308,9 @@ def fetch_tw_stock_list() -> dict:
                 if len(parts) != 2:
                     continue
                 code, name = parts[0].strip(), parts[1].strip()
+                # 證交所名稱有時帶尾碼「*」（標示面額非十元），但鄉民打字不會打這個
+                # 符號，不去掉的話這類股票永遠無法用名稱比對命中（只能靠代碼數字比對）
+                name = name.rstrip("*").strip()
                 if re.fullmatch(r"\d{4}", code):  # 只留 4 位數一般股票
                     stock_map[name] = (code, market)
         if not stock_map:
@@ -570,6 +574,7 @@ def main():
     word_rows = [
         [today.isoformat(), rank, word, freq]
         for rank, (word, freq) in enumerate(word_freq.most_common(), start=1)
+        if freq >= MIN_WORD_FREQ_TO_SHEET
     ]
     write_to_google_sheets(stock_rows, word_rows, day=today.isoformat())
 
