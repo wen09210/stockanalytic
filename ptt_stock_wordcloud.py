@@ -40,7 +40,6 @@ BOARD = "Stock"                          # 要爬的看板名稱
 WORDCLOUD_OUTPUT = "wordcloud.png"       # 文字雲輸出檔名
 REPORT_OUTPUT = "report_live.html"       # HTML 網頁報告輸出檔名
                                          # （report.html 保留給分頁器首頁，避免互相覆蓋）
-TOP_N_WORDS = 200                        # 文字雲最多顯示的詞數
 EXCLUDE_TITLE_KEYWORDS = ["[公告]"]      # 標題含這些關鍵字的置底文不分析（可自行增減）
 
 # 常見中文停用詞（可自行擴充，或改成讀取外部停用詞檔）
@@ -286,7 +285,7 @@ def draw_wordcloud(word_freq: Counter, output_path: str) -> None:
         height=800,
         background_color="#131722",  # 深色底，配合交易平台風格的網頁報告
         colormap="summer",           # 綠色系文字
-        max_words=TOP_N_WORDS,
+        max_words=len(word_freq),    # 不設上限，讓所有字詞都能進文字雲
     ).generate_from_frequencies(word_freq)
 
     plt.figure(figsize=(12, 8))
@@ -507,18 +506,18 @@ def generate_html_report(
         for a in articles
     )
 
-    # --- 高頻詞 Top 20 標籤（股票相關，綠色）---
+    # --- 高頻詞標籤（股票相關，綠色，全部字詞）---
     top_words = "\n".join(
         f'<span class="tag">{word} <b>{freq}</b></span>'
-        for word, freq in word_freq.most_common(20)
+        for word, freq in word_freq.most_common()
     )
 
-    # --- 不相關詞標籤（灰色，另列一區、不進文字雲）---
+    # --- 不相關詞標籤（灰色，另列一區、不進文字雲，全部字詞）---
     offtopic_card = ""
     if unrelated_words:
         offtopic_tags = "\n".join(
             f'<span class="tag dim">{word} <b>{freq}</b></span>'
-            for word, freq in unrelated_words.most_common(20)
+            for word, freq in unrelated_words.most_common()
         )
         offtopic_card = f"""
   <div class="card">
@@ -695,7 +694,7 @@ def generate_html_report(
   </div>
 
   <div class="card">
-    <h2>Trending — 股票相關高頻詞 Top 20</h2>
+    <h2>Trending — 股票相關高頻詞</h2>
     {top_words}
   </div>
 {offtopic_card}
