@@ -496,7 +496,7 @@ def generate_html_report(
     """
     import base64
     import os
-    from datetime import datetime
+    from datetime import datetime, timezone, timedelta
 
     # --- 將文字雲圖片轉成 base64 內嵌，讓 HTML 單檔即可攜帶 ---
     img_tag = "<p>（文字雲圖片產生失敗）</p>"
@@ -584,7 +584,10 @@ def generate_html_report(
     else:
         stock_table = "<p>文章中未偵測到上市櫃公司。</p>"
 
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # 用台灣時間（UTC+8）顯示產生時間；GitHub Actions runner 是 UTC，
+    # 直接 datetime.now() 會顯示成 UTC 時間，故明確指定時區換算
+    tw_now = datetime.now(timezone(timedelta(hours=8)))
+    generated_at = tw_now.strftime("%Y-%m-%d %H:%M") + "（台灣時間）"
     html = f"""<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
