@@ -41,7 +41,7 @@ WORDCLOUD_OUTPUT = "wordcloud.png"       # 文字雲輸出檔名
 REPORT_OUTPUT = "report_live.html"       # HTML 網頁報告輸出檔名
                                          # （report.html 保留給分頁器首頁，避免互相覆蓋）
 EXCLUDE_TITLE_KEYWORDS = ["[公告]"]      # 標題含這些關鍵字的置底文不分析（可自行增減）
-MIN_WORD_FREQ = 5                        # 報告只顯示出現次數大於此值的字詞（濾掉只出現一兩次的雜訊詞）
+MIN_WORD_FREQ = 5                        # 報告只顯示出現次數 >= 此值的字詞（濾掉只出現一兩次的雜訊詞）
 
 # 常見中文停用詞（可自行擴充，或改成讀取外部停用詞檔）
 STOPWORDS = {
@@ -87,12 +87,12 @@ def classify_words(word_freq: Counter, extra_related=(),
     """把詞頻分成（股票相關, 不相關）兩個 Counter。
 
     判斷順序：公司名稱等額外清單 → 股市詞彙表 → 含股市關鍵字元。
-    出現次數 <= min_freq 的字詞視為雜訊，直接濾掉、不會進報告。
+    出現次數 < min_freq 的字詞視為雜訊，直接濾掉、不會進報告。
     """
     extra = set(extra_related)
     related, unrelated = Counter(), Counter()
     for word, freq in word_freq.items():
-        if freq <= min_freq:
+        if freq < min_freq:
             continue
         if (word in extra or word in STOCK_TERM_WORDS
                 or any(ch in word for ch in STOCK_TERM_CHARS)):
