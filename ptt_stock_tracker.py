@@ -55,6 +55,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import jieba
+import jieba.posseg as pseg
 from wordcloud import WordCloud
 import matplotlib
 matplotlib.use("Agg")  # 不開視窗，直接輸出圖片檔
@@ -227,14 +228,33 @@ def get_article_content(session: requests.Session, url: str) -> dict:
 # ---------------------------------------------------------------------------
 # 2. jieba 斷詞、詞頻統計與文字雲
 # ---------------------------------------------------------------------------
+def register_stock_words(stock_map: dict) -> None:
+    """把上市櫃公司名稱掛進 jieba 自訂詞典。
+
+    jieba 內建詞庫以簡體為主，對台股名稱常會拆錯（例如「台積電」被切成
+    「台積 / 電」）。把公司名以專有名詞（nz）掛進詞典後，斷詞會把整個名稱
+    當成一個詞，POS 過濾時也不會被誤判成時間詞而刪掉。
+    """
+    for name in stock_map:
+        if len(name) >= 2:
+            jieba.add_word(name, tag="nz")
+
+
 def tokenize_and_count(texts: list[str]) -> Counter:
-    """斷詞、過濾後統計詞頻。"""
+    """斷詞、過濾後統計詞頻。
+
+    改用 jieba.posseg 取得詞性，時間詞（詞性 t，如今天／明天／昨天）直接
+    依詞性濾掉，不必逐一列進停用詞清單。STOPWORDS 仍保留作為保險
+    （jieba 對繁體的詞性判斷偶有誤差）。
+    """
     counter = Counter()
     for text in texts:
-        for word in jieba.cut(text):
-            word = word.strip()
+        for token in pseg.cut(text):
+            word = token.word.strip()
             if not word or len(word) < 2:
                 continue                      # 過濾空白與單字詞
+            if token.flag == "t":
+                continue                      # 依詞性過濾時間詞（今天/明天/昨天…）
             if word in STOPWORDS:
                 continue                      # 過濾停用詞
             if re.fullmatch(r"[\W\d_]+", word):
@@ -539,16 +559,20 @@ def main():
     # 記錄今天的資料來源（PTT 文章連結）到 sources.json，供報告的參考資料使用
     _record_source(today.isoformat(), pinned[0], push_total)
 
-    # --- 步驟 2：斷詞統計 + 文字雲 ---
+    # --- 步驟 2：先載入台股清單（順便掛成 jieba 自訂詞典，避免公司名被拆開）---
+    print("[資訊] 載入台股上市櫃清單...")
+    stock_map = fetch_tw_stock_list()
+    register_stock_words(stock_map)
+
+    # --- 步驟 3：斷詞統計 + 文字雲 ---
     print("[資訊] jieba 斷詞與詞頻統計...")
     word_freq = tokenize_and_count(all_texts)
     print(f"[資訊] 有效詞彙 {len(word_freq)} 個，前 5 高頻：", end=" ")
     print("、".join(f"{w}({c})" for w, c in word_freq.most_common(5)))
     draw_wordcloud(word_freq, WORDCLOUD_OUTPUT)
 
-    # --- 步驟 3：股票辨識與熱門度 ---
-    print("[資訊] 載入台股上市櫃清單並統計提及次數...")
-    stock_map = fetch_tw_stock_list()
+    # --- 步驟 4：股票辨識與熱門度（重用 stock_map）---
+    print("[資訊] 統計各標的提及次數...")
     hot_stocks = count_stock_mentions(all_texts, stock_map)
     if not hot_stocks:
         sys.exit("[結束] 文中未偵測到任何上市櫃股票")
@@ -557,7 +581,7 @@ def main():
     for s in hot_stocks:
         print(f"  {s['name']}({s['code']}, {s['market']})：提及 {s['mentions']} 次")
 
-    # --- 步驟 4：組資料列並寫入 Google Sheets ---
+    # --- 步驟 5：組資料列並寫入 Google Sheets ---
     print("[資訊] 查詢各標的收盤價（yfinance，涵蓋上市＋上櫃）...")
     stock_rows = []
     for s in hot_stocks:
