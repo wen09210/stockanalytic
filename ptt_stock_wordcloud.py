@@ -26,6 +26,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import jieba
+import jieba.posseg as pseg
 from wordcloud import WordCloud
 import matplotlib
 matplotlib.use("Agg")  # 不開視窗，直接輸出圖片檔
@@ -235,16 +236,35 @@ def get_article_content(session: requests.Session, url: str) -> dict:
 # ---------------------------------------------------------------------------
 # 2. jieba 斷詞 + 詞頻統計
 # ---------------------------------------------------------------------------
+def register_stock_words(stock_map: dict) -> None:
+    """把上市櫃公司名稱掛進 jieba 自訂詞典。
+
+    jieba 內建詞庫以簡體為主，對台股名稱常會拆錯（例如「台積電」被切成
+    「台積 / 電」）。把公司名以專有名詞（nz）掛進詞典後，斷詞會把整個名稱
+    當成一個詞，POS 過濾時也不會被誤判成時間詞而刪掉。
+    """
+    for name in stock_map:
+        if len(name) >= 2:
+            jieba.add_word(name, tag="nz")
+
+
 def tokenize_and_count(texts: list[str]) -> Counter:
-    """將多段文字斷詞、過濾後統計詞頻。"""
+    """將多段文字斷詞、過濾後統計詞頻。
+
+    改用 jieba.posseg 取得詞性，時間詞（詞性 t，如今天／明天／昨天）直接
+    依詞性濾掉，不必逐一列進停用詞清單。STOPWORDS 仍保留作為保險
+    （jieba 對繁體的詞性判斷偶有誤差）。
+    """
     counter = Counter()
     for text in texts:
-        for word in jieba.cut(text):
-            word = word.strip()
+        for token in pseg.cut(text):
+            word = token.word.strip()
             if not word:
                 continue                      # 過濾空白
             if len(word) < 2:
                 continue                      # 過濾單字（多為虛詞/標點）
+            if token.flag == "t":
+                continue                      # 依詞性過濾時間詞（今天/明天/昨天…）
             if word in STOPWORDS:
                 continue                      # 過濾停用詞
             if re.fullmatch(r"[\W\d_]+", word):
@@ -747,13 +767,14 @@ def main():
         all_texts.extend(data["pushes"])
     print(f"[資訊] 共抓取 {len(pinned)} 篇置底文章")
 
-    # --- 步驟 2：斷詞與詞頻統計 ---
-    print("[資訊] 進行 jieba 斷詞與詞頻統計...")
-    word_freq = tokenize_and_count(all_texts)
-
-    # --- 步驟 3：載入股票清單、把詞分成「股票相關 / 不相關」---
+    # --- 步驟 2：先載入股票清單（順便掛成 jieba 自訂詞典，避免公司名被拆開）---
     print("[資訊] 載入台股上市櫃公司清單...")
     stock_map = fetch_tw_stock_list()
+    register_stock_words(stock_map)
+
+    # --- 步驟 3：斷詞與詞頻統計，並把詞分成「股票相關 / 不相關」---
+    print("[資訊] 進行 jieba 斷詞與詞頻統計...")
+    word_freq = tokenize_and_count(all_texts)
     related, unrelated = classify_words(word_freq, extra_related=stock_map.keys())
     print(f"[資訊] 詞彙 {len(word_freq)} 個 → 股票相關 {len(related)}、"
           f"不相關 {len(unrelated)}")

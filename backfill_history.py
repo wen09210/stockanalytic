@@ -81,6 +81,7 @@ def scrape_day(session, url: str, cutoff: str) -> tuple:
 def main():
     session = t.make_ptt_session()
     stock_map = t.fetch_tw_stock_list()
+    t.register_stock_words(stock_map)  # 把公司名掛進 jieba 詞典，避免斷詞拆開股名
 
     per_day = {}     # date -> {"stocks": [...], "words": [...]}
     sources = {}     # date -> {"title", "url", "pushes"}
