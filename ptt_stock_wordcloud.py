@@ -61,6 +61,9 @@ STOPWORDS = {
     # PTT 推文常見雜訊
     "XD", "xd", "推", "噓", "http", "https", "www", "com", "cc", "imgur",
     "jpg", "jpeg", "png", "gif", "mopix",  # 圖片連結產生的雜訊
+    # 網域碎片保險（正常情況已由 strip_urls 在斷詞前移除整串網址，
+    # 這裡防的是沒有 http/www 開頭的裸網域，例如「tw.stock.yahoo.com」）
+    "tw", "TW", "yahoo", "quote", "stock", "html", "php", "net", "org",
 }
 
 # 公司簡稱剛好是常見中文詞的排除清單（避免誤判，可自行增減）
@@ -94,7 +97,8 @@ STOCK_TERM_WORDS = {
     "開高", "開低", "收紅", "收黑", "熔斷", "大盤", "指數", "行情",
     "賭場", "航運", "半導體", "電子", "金融", "台積", "現貨", "零股",
     "市場", "交易", "持股", "買進", "賣出", "進場", "出場", "獲利", "損益",
-    "tw", "TW",
+    # 註：原本這裡有 "tw"/"TW"，但它們其實是股票連結網址被斷詞後的碎片，
+    # 不是股市術語，會讓雜訊被誤判成相關詞，已移除（網址改在斷詞前移除）
     # 股板常見術語與鄉民用語（同時掛進 jieba 詞典，見 register_stock_words）
     "存股", "當沖客", "隔日沖", "沖銷", "違約交割", "融資追繳", "斷頭",
     "除權息", "填息", "貼息", "現增", "減資", "庫藏股", "可轉債",
@@ -280,16 +284,27 @@ def register_stock_words(stock_map: dict) -> None:
             jieba.add_word(term, tag="n")
 
 
+def strip_urls(text: str) -> str:
+    """把網址整串移除，避免斷詞後留下 tw / yahoo / quote 之類的網域碎片。
+
+    鄉民常在推文貼股票連結（https://tw.stock.yahoo.com/quote/2330.TW），
+    整串丟進 jieba 會被切成一堆無意義片段混進文字雲，逐一加停用詞補不完，
+    直接在斷詞前移除最乾淨。
+    """
+    return re.sub(r"https?://\S+|www\.\S+", " ", text)
+
+
 def tokenize_and_count(texts: list[str]) -> Counter:
     """將多段文字斷詞、過濾後統計詞頻。
 
+    斷詞前先移除網址（見 strip_urls），避免網域碎片混進詞頻。
     改用 jieba.posseg 取得詞性，時間詞（詞性 t，如今天／明天／昨天）直接
     依詞性濾掉，不必逐一列進停用詞清單。STOPWORDS 仍保留作為保險
     （jieba 對繁體的詞性判斷偶有誤差）。
     """
     counter = Counter()
     for text in texts:
-        for token in pseg.cut(text):
+        for token in pseg.cut(strip_urls(text)):
             word = token.word.strip()
             if not word:
                 continue                      # 過濾空白

@@ -105,6 +105,9 @@ STOPWORDS = {
     # PTT 推文與圖片連結常見雜訊
     "XD", "xd", "推", "噓", "http", "https", "www", "com", "cc", "imgur",
     "jpg", "jpeg", "png", "gif", "mopix",
+    # 網域碎片保險（正常情況已由 strip_urls 在斷詞前移除整串網址，
+    # 這裡防的是沒有 http/www 開頭的裸網域，例如「tw.stock.yahoo.com」）
+    "tw", "TW", "yahoo", "quote", "stock", "html", "php", "net", "org",
 }
 
 # 公司簡稱剛好是常見中文詞的排除清單（避免誤判，可自行增減）
@@ -250,16 +253,27 @@ def register_stock_words(stock_map: dict) -> None:
             jieba.add_word(term, tag="n")
 
 
+def strip_urls(text: str) -> str:
+    """把網址整串移除，避免斷詞後留下 tw / yahoo / quote 之類的網域碎片。
+
+    鄉民常在推文貼股票連結（https://tw.stock.yahoo.com/quote/2330.TW），
+    整串丟進 jieba 會被切成一堆無意義片段混進文字雲，逐一加停用詞補不完，
+    直接在斷詞前移除最乾淨。
+    """
+    return re.sub(r"https?://\S+|www\.\S+", " ", text)
+
+
 def tokenize_and_count(texts: list[str]) -> Counter:
     """斷詞、過濾後統計詞頻。
 
+    斷詞前先移除網址（見 strip_urls），避免網域碎片混進詞頻。
     改用 jieba.posseg 取得詞性，時間詞（詞性 t，如今天／明天／昨天）直接
     依詞性濾掉，不必逐一列進停用詞清單。STOPWORDS 仍保留作為保險
     （jieba 對繁體的詞性判斷偶有誤差）。
     """
     counter = Counter()
     for text in texts:
-        for token in pseg.cut(text):
+        for token in pseg.cut(strip_urls(text)):
             word = token.word.strip()
             if not word or len(word) < 2:
                 continue                      # 過濾空白與單字詞
