@@ -73,7 +73,17 @@ AMBIGUOUS_COMPANY_NAMES = {
 
 # ---- 股票相關詞彙判斷 ----
 # 只要詞中含有這些「字」就視為股市相關（股、盤、漲、跌、噴＝股板行情用語）
+# 註：這是輔助規則，容易誤判的詞另列 NON_STOCK_WORDS 排除
 STOCK_TERM_CHARS = "股盤漲跌噴崩"
+
+# 含 STOCK_TERM_CHARS 但其實與股市無關的常見詞（優先於字元規則）
+# 例如「漲價」講的是物價、「崩潰」「跌倒」是情緒或動作
+NON_STOCK_WORDS = {
+    "漲價", "漲租", "調漲", "崩潰", "崩壞", "山崩",
+    "跌倒", "摔跌", "跌落", "盤子", "盤古", "地盤", "盤點",
+    "盤問", "盤據", "全盤", "通盤", "算盤", "棋盤", "盤腿",
+    "股溝", "屁股", "噴飯", "噴漆", "噴水",
+}
 # 不含上述字但仍屬股市用語的完整詞（可自行擴充）
 STOCK_TERM_WORDS = {
     "台指", "富台", "小台", "大台", "期貨", "選擇權", "權證", "ETF", "etf",
@@ -85,6 +95,16 @@ STOCK_TERM_WORDS = {
     "賭場", "航運", "半導體", "電子", "金融", "台積", "現貨", "零股",
     "市場", "交易", "持股", "買進", "賣出", "進場", "出場", "獲利", "損益",
     "tw", "TW",
+    # 股板常見術語與鄉民用語（同時掛進 jieba 詞典，見 register_stock_words）
+    "存股", "當沖客", "隔日沖", "沖銷", "違約交割", "融資追繳", "斷頭",
+    "除權息", "填息", "貼息", "現增", "減資", "庫藏股", "可轉債",
+    "護國神山", "航海王", "鋼鐵人", "少年股神", "股海", "韭菜田",
+    "多方", "空方", "軋空", "回補", "攤平", "加碼", "減碼", "停利點",
+    "支撐", "壓力", "均線", "季線", "年線", "月線", "爆量", "量縮",
+    "跳空", "漲停", "跌停", "當日沖銷", "現股當沖", "當沖降稅",
+    "本淨比", "毛利率", "淨利", "eps", "EPS", "殖利", "配股",
+    "台股", "美股", "陸股", "港股", "日股", "費半", "那斯達克", "道瓊",
+    "標普", "台幣", "美元", "匯率", "升息", "降息", "聯準會", "央行",
 }
 
 
@@ -92,7 +112,10 @@ def classify_words(word_freq: Counter, extra_related=(),
                     min_freq: int = MIN_WORD_FREQ) -> tuple:
     """把詞頻分成（股票相關, 不相關）兩個 Counter。
 
-    判斷順序：公司名稱等額外清單 → 股市詞彙表 → 含股市關鍵字元。
+    判斷順序（白名單優先於字元啟發式，減少誤判）：
+      1. 公司名稱等額外清單、股市詞彙表 → 相關
+      2. NON_STOCK_WORDS 排除清單 → 不相關（即使含股市關鍵字元）
+      3. 含股市關鍵字元 → 相關
     出現次數 < min_freq 的字詞視為雜訊，直接濾掉、不會進報告。
     """
     extra = set(extra_related)
@@ -100,9 +123,12 @@ def classify_words(word_freq: Counter, extra_related=(),
     for word, freq in word_freq.items():
         if freq < min_freq:
             continue
-        if (word in extra or word in STOCK_TERM_WORDS
-                or any(ch in word for ch in STOCK_TERM_CHARS)):
-            related[word] = freq
+        if word in extra or word in STOCK_TERM_WORDS:
+            related[word] = freq          # 白名單：最高優先
+        elif word in NON_STOCK_WORDS:
+            unrelated[word] = freq        # 排除清單：擋掉字元規則的誤判
+        elif any(ch in word for ch in STOCK_TERM_CHARS):
+            related[word] = freq          # 字元啟發式：輔助規則
         else:
             unrelated[word] = freq
     return related, unrelated
@@ -237,15 +263,21 @@ def get_article_content(session: requests.Session, url: str) -> dict:
 # 2. jieba 斷詞 + 詞頻統計
 # ---------------------------------------------------------------------------
 def register_stock_words(stock_map: dict) -> None:
-    """把上市櫃公司名稱掛進 jieba 自訂詞典。
+    """把上市櫃公司名稱與股市術語掛進 jieba 自訂詞典。
 
     jieba 內建詞庫以簡體為主，對台股名稱常會拆錯（例如「台積電」被切成
     「台積 / 電」）。把公司名以專有名詞（nz）掛進詞典後，斷詞會把整個名稱
     當成一個詞，POS 過濾時也不會被誤判成時間詞而刪掉。
+
+    股市術語（存股、當沖、除權息、護國神山…）同樣掛進詞典：斷詞更準之外，
+    也讓 classify_words() 能靠白名單正確認出它們是股市相關詞。
     """
     for name in stock_map:
         if len(name) >= 2:
             jieba.add_word(name, tag="nz")
+    for term in STOCK_TERM_WORDS:
+        if len(term) >= 2:
+            jieba.add_word(term, tag="n")
 
 
 def tokenize_and_count(texts: list[str]) -> Counter:
