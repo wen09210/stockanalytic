@@ -229,15 +229,25 @@ def get_article_content(session: requests.Session, url: str) -> dict:
 # 2. jieba 斷詞、詞頻統計與文字雲
 # ---------------------------------------------------------------------------
 def register_stock_words(stock_map: dict) -> None:
-    """把上市櫃公司名稱掛進 jieba 自訂詞典。
+    """把上市櫃公司名稱與股市術語掛進 jieba 自訂詞典。
 
     jieba 內建詞庫以簡體為主，對台股名稱常會拆錯（例如「台積電」被切成
     「台積 / 電」）。把公司名以專有名詞（nz）掛進詞典後，斷詞會把整個名稱
     當成一個詞，POS 過濾時也不會被誤判成時間詞而刪掉。
+
+    股市術語（存股、當沖、除權息、護國神山…）沿用 ptt_stock_wordcloud 的
+    STOCK_TERM_WORDS，避免兩邊各自維護一份而不同步。
     """
     for name in stock_map:
         if len(name) >= 2:
             jieba.add_word(name, tag="nz")
+    try:
+        from ptt_stock_wordcloud import STOCK_TERM_WORDS
+    except ImportError:      # 單獨執行且找不到該模組時，僅掛公司名即可
+        return
+    for term in STOCK_TERM_WORDS:
+        if len(term) >= 2:
+            jieba.add_word(term, tag="n")
 
 
 def tokenize_and_count(texts: list[str]) -> Counter:
@@ -356,8 +366,47 @@ def fetch_tw_stock_list() -> dict:
     return stock_map
 
 
+# 4 位數若「後面」緊跟這些單位，多半是年份/價格/數量，不是股票代碼
+_NON_CODE_SUFFIX = ("年", "元", "點", "塊", "％", "%", "萬", "億")
+# 「股」「張」當數量單位時同理，但後面若還接著字（2330股票／2330張力）就不算單位，
+# 需要單獨處理：只有「數字+股/張」剛好結尾或接非中文字時才視為數量
+_NON_CODE_UNIT = ("股", "張")
+# 4 位數若「前面」緊跟這些字，多半是價格或民國年，不是股票代碼
+_NON_CODE_PREFIX = ("民國", "西元", "收在", "漲到", "跌到", "破", "$", "＄")
+
+
+def _is_cjk(ch: str) -> bool:
+    """是否為中日韓統一表意文字（用來判斷量詞後面還有沒有接字）。"""
+    return bool(ch) and "一" <= ch <= "鿿"
+
+
+def _looks_like_non_code(text: str, match: re.Match) -> bool:
+    """判斷這個 4 位數字比較像年份/價格而不是股票代碼。
+
+    例如「2025 年」「收在 1500 點」裡的數字剛好等於某檔股票代碼時，
+    不該被算成一次提及。
+    """
+    num = int(match.group(1))
+    if 1900 <= num <= 2100:      # 明顯的西元年份區間
+        return True
+    after = text[match.end():match.end() + 2]
+    if after.startswith(_NON_CODE_SUFFIX):
+        return True
+    # 「股」「張」只有單獨當量詞時才算（2330股 → 數量；2330股票 → 是代碼）
+    if after[:1] in _NON_CODE_UNIT and not _is_cjk(after[1:2]):
+        return True
+    before = text[max(0, match.start() - 2):match.start()]
+    if before.endswith(_NON_CODE_PREFIX):
+        return True
+    return False
+
+
 def count_stock_mentions(texts: list[str], stock_map: dict) -> list[dict]:
     """統計每檔股票在文本中被提及的次數（名稱出現次數 + 代碼出現次數）。
+
+    名稱比對以「詞元」為單位（斷詞後整個詞剛好等於公司名才算），而不是子字串
+    比對，避免「中華」被「中華電信／中華民國／中華隊」灌水這類誤判。
+    （公司名已由 register_stock_words() 掛進 jieba 詞典，會被切成完整一個詞。）
 
     回傳依提及次數由高到低排序的
     [{"code": 代碼, "name": 名稱, "market": 市場別, "mentions": 次數}, ...]
@@ -367,18 +416,25 @@ def count_stock_mentions(texts: list[str], stock_map: dict) -> list[dict]:
 
     mention_counter = Counter()  # key: 股票代碼
 
-    # (a) 公司名稱出現次數（排除易誤判的模糊名稱）
+    # (a) 公司名稱出現次數：以斷詞後的詞元比對，整個詞相等才算一次
+    token_freq = Counter(
+        tok for text in texts for tok in jieba.cut(text) if len(tok.strip()) >= 2
+    )
     for name, (code, _market) in stock_map.items():
         if name in AMBIGUOUS_COMPANY_NAMES or len(name) < 2:
             continue
-        n = full_text.count(name)
+        n = token_freq.get(name, 0)
         if n > 0:
             mention_counter[code] += n
 
     # (b) 4 位數代碼出現次數（前後不能緊鄰數字，避免抓到年份等）
-    for code in re.findall(r"(?<!\d)(\d{4})(?!\d)", full_text):
-        if code in code_map:
-            mention_counter[code] += 1
+    for m in re.finditer(r"(?<!\d)(\d{4})(?!\d)", full_text):
+        code = m.group(1)
+        if code not in code_map:
+            continue
+        if _looks_like_non_code(full_text, m):
+            continue
+        mention_counter[code] += 1
 
     results = []
     for code, mentions in mention_counter.most_common():
