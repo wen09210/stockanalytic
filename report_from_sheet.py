@@ -109,7 +109,9 @@ def parse_sheet(rows: list[list[str]], target_date) -> tuple:
             continue
         if mode == "stock" and len(cells) >= 4:
             d, code, name, mentions = cells[0], cells[1], cells[2], cells[3]
-            if not code.isdigit():
+            # 台股是 4 位數字，美股是英文代碼（NVDA、BRK-B）：兩者都要收，
+            # 但要擋掉表頭殘留或空白等雜列
+            if not re.fullmatch(r"\d{4}|[A-Z][A-Z0-9.\-]{0,6}", code):
                 continue
             stocks_by_date.setdefault(d, []).append({
                 "code": code, "name": name,
@@ -140,8 +142,9 @@ _history_cache: dict = {}  # code -> [(YYYY-MM-DD, close), ...]，避免重複�
 
 
 def _get_history(code: str):
-    """抓該股票近兩個月的日收盤序列（.TW 失敗改試 .TWO），並快取。
+    """抓該股票近兩個月的日收盤序列並快取。
 
+    台股試 .TW（上市）失敗再試 .TWO（上櫃）；美股代碼（含英文字母）不加後綴。
     會過濾掉 NaN/inf 的收盤價（yfinance 對盤中無成交、剛上市/上櫃的股票
     偶爾會回傳這種值），避免報告上顯示出字面上的「nan」。
     """
@@ -149,7 +152,9 @@ def _get_history(code: str):
     if code in _history_cache:
         return _history_cache[code]
     result = (None, [])
-    for suffix in (".TW", ".TWO"):
+    # 美股代碼含英文字母（NVDA、BRK-B），台股是純 4 位數字
+    suffixes = ("",) if not code.isdigit() else (".TW", ".TWO")
+    for suffix in suffixes:
         try:
             hist = yf.Ticker(code + suffix).history(period="2mo")
             if not hist.empty:
