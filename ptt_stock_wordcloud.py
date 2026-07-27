@@ -615,10 +615,16 @@ def generate_html_report(
         arrow = "▲" if pct > 0 else "▼"
         return f'<span class="pill {cls}">{arrow} {pct:+.2f}%</span>'
 
+    def quote_url(symbol: str) -> str:
+        """報價連結：台股用 Yahoo 奇摩股市，美股用美國 Yahoo Finance。"""
+        if symbol.endswith((".TW", ".TWO")):
+            return f"https://tw.stock.yahoo.com/quote/{symbol}"
+        return f"https://finance.yahoo.com/quote/{symbol}"
+
     # --- 頂部熱門標的卡片（提及次數前 5 名） ---
     top_cards = ""
     for s in stock_results[:5]:
-        yahoo_url = f'https://tw.stock.yahoo.com/quote/{s["symbol"]}'
+        yahoo_url = quote_url(s["symbol"])
         top_cards += f"""
       <a class="ticker-card" href="{yahoo_url}" target="_blank">
         <div class="tc-name">{s['name']}<span class="tc-sym">{s['symbol']}</span></div>
@@ -632,7 +638,7 @@ def generate_html_report(
         max_mentions = max(s["mentions"] for s in stock_results)
         rows = []
         for s in stock_results:
-            yahoo_url = f'https://tw.stock.yahoo.com/quote/{s["symbol"]}'
+            yahoo_url = quote_url(s["symbol"])
             up = s["change_pct"] is not None and s["change_pct"] > 0
             spark = _sparkline_svg(s["closes"], up=up)
             bar_w = int(s["mentions"] / max_mentions * 100)

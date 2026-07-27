@@ -118,6 +118,61 @@ AMBIGUOUS_COMPANY_NAMES = {
     "華電", "美亞", "正文", "力士", "熱映",
 }
 
+# ---- 美股精選清單 ----
+# PTT 股板真正常被討論的美股。刻意「不」抓全美股六千檔代碼清單：ON/IT/ALL/
+# SO/NOW/AI 這類短代碼會跟推文裡的英文縮寫大量誤撞，熱門度會嚴重灌水。
+# 格式：代碼 -> (顯示名稱, [中文暱稱與別名, ...])
+# 比對以中文暱稱為主（鄉民多半打中文），代碼為輔（需全大寫且獨立成詞）。
+US_STOCKS = {
+    "NVDA": ("輝達", ["輝達", "輝達股", "黃仁勳"]),
+    "TSLA": ("特斯拉", ["特斯拉", "特斯拉股"]),
+    "AAPL": ("蘋果", ["蘋果", "蘋果公司"]),
+    "MSFT": ("微軟", ["微軟"]),
+    "GOOGL": ("谷歌", ["谷歌", "google", "Google", "字母"]),
+    "AMZN": ("亞馬遜", ["亞馬遜"]),
+    "META": ("Meta", ["臉書", "祖克柏"]),
+    "AMD": ("超微", ["超微", "蘇姿丰"]),
+    "INTC": ("英特爾", ["英特爾"]),
+    "MU": ("美光", ["美光"]),
+    "AVGO": ("博通", ["博通"]),
+    "QCOM": ("高通", ["高通"]),
+    "TSM": ("台積電ADR", ["台積電ADR", "台積ADR"]),
+    "ASML": ("艾司摩爾", ["艾司摩爾", "艾斯摩爾"]),
+    "ARM": ("安謀", ["安謀"]),
+    "MRVL": ("邁威爾", ["邁威爾"]),
+    "SMCI": ("美超微", ["美超微"]),
+    "DELL": ("戴爾", ["戴爾"]),
+    "ORCL": ("甲骨文", ["甲骨文"]),
+    "CRM": ("賽富時", ["賽富時"]),
+    "ADBE": ("奧多比", ["奧多比"]),
+    "NFLX": ("網飛", ["網飛"]),
+    "DIS": ("迪士尼", ["迪士尼"]),
+    "KO": ("可口可樂", ["可口可樂"]),
+    "PLTR": ("Palantir", ["帕蘭泰爾"]),
+    "COIN": ("Coinbase", ["幣安基地"]),
+    "MSTR": ("microstrategy", ["微策略"]),
+    "BRK-B": ("波克夏", ["波克夏", "巴菲特"]),
+    "JPM": ("摩根大通", ["摩根大通"]),
+    "GS": ("高盛", ["高盛"]),
+    "BA": ("波音", ["波音"]),
+    "F": ("福特", ["福特"]),
+    "GM": ("通用汽車", ["通用汽車"]),
+    "PFE": ("輝瑞", ["輝瑞"]),
+    "LLY": ("禮來", ["禮來"]),
+    "NVO": ("諾和諾德", ["諾和諾德"]),
+    "UBER": ("優步", ["優步"]),
+    "ABNB": ("Airbnb", ["愛彼迎"]),
+    "SPY": ("標普500ETF", ["標普500", "SPY"]),
+    "QQQ": ("那斯達克100ETF", ["QQQ"]),
+    "VOO": ("VOO", ["VOO"]),
+    "SOXL": ("半導體3倍做多", ["SOXL"]),
+    "TQQQ": ("那斯達克3倍做多", ["TQQQ"]),
+}
+
+# 美股代碼若剛好是這些字串就不比對代碼（避免與英文縮寫/一般用字誤撞）
+# 只留「代碼本身夠獨特」的才用代碼比對；其餘僅靠中文暱稱辨識
+US_AMBIGUOUS_TICKERS = {"F", "GM", "GS", "BA", "KO", "MU", "DIS", "ARM", "META"}
+
 # 中文字型候選路徑（由上往下找，找到第一個存在的就用）
 FONT_CANDIDATES = [
     "/System/Library/Fonts/PingFang.ttc",                       # macOS 蘋方
@@ -244,6 +299,11 @@ def register_stock_words(stock_map: dict) -> None:
     for name in stock_map:
         if len(name) >= 2:
             jieba.add_word(name, tag="nz")
+    # 美股中文暱稱（輝達、超微、美光…）也掛進詞典，否則會被拆開而比對不到
+    for _name, aliases in US_STOCKS.values():
+        for alias in aliases:
+            if len(alias) >= 2:
+                jieba.add_word(alias, tag="nz")
     try:
         from ptt_stock_wordcloud import STOCK_TERM_WORDS
     except ImportError:      # 單獨執行且找不到該模組時，僅掛公司名即可
@@ -458,6 +518,37 @@ def count_stock_mentions(texts: list[str], stock_map: dict) -> list[dict]:
         results.append({
             "code": code, "name": name, "market": market, "mentions": mentions,
         })
+    results.extend(count_us_mentions(texts))
+    results.sort(key=lambda s: -s["mentions"])
+    return results
+
+
+def count_us_mentions(texts: list[str]) -> list[dict]:
+    """統計美股精選清單被提及的次數，回傳與台股相同結構的清單。
+
+    中文暱稱以詞元比對（同台股做法，避免子字串灌水）；英文代碼則要求
+    「全大寫、且前後不是英數字」才算，並排除 F/GM/KO 這類容易與英文縮寫
+    誤撞的短代碼（見 US_AMBIGUOUS_TICKERS，那些只靠中文暱稱辨識）。
+    """
+    full_text = strip_urls("\n".join(texts))   # 網址裡常有 AAPL 之類的字串，先清掉
+    token_freq = Counter(
+        tok for text in texts
+        for tok in jieba.cut(strip_urls(text)) if len(tok.strip()) >= 2
+    )
+
+    results = []
+    for ticker, (name, aliases) in US_STOCKS.items():
+        mentions = sum(token_freq.get(alias, 0) for alias in aliases)
+        if ticker not in US_AMBIGUOUS_TICKERS:
+            # 代碼需獨立出現（前後非英數字），避免抓到 NVDAxx 這種黏在一起的字串
+            mentions += len(re.findall(
+                rf"(?<![A-Za-z0-9]){re.escape(ticker)}(?![A-Za-z0-9])", full_text
+            ))
+        if mentions >= MIN_MENTIONS:
+            results.append({
+                "code": ticker, "name": name, "market": "美股",
+                "mentions": mentions,
+            })
     return results
 
 
@@ -469,19 +560,27 @@ def build_price_formula(code: str, check_date: date) -> str:
 
     注意：GOOGLEFINANCE 的 "TPE:" 前綴只涵蓋台灣「上市」股票，
     上櫃（TPEx）標的多半抓不到、會顯示 #N/A。預設改用 yfinance 靜態收盤價
-    （見 fetch_close_price），涵蓋上市＋上櫃。
+    （見 fetch_close_price），涵蓋上市＋上櫃＋美股。
+
+    美股代碼不加 "TPE:" 前綴，GOOGLEFINANCE 直接吃代碼即可。
     """
+    symbol = f"TPE:{code}" if code.isdigit() else code
     if USE_HISTORICAL_CLOSE:
         d = check_date
         return (
-            f'=INDEX(GOOGLEFINANCE("TPE:{code}","close",'
+            f'=INDEX(GOOGLEFINANCE("{symbol}","close",'
             f'DATE({d.year},{d.month},{d.day})),2,2)'
         )
-    return f'=GOOGLEFINANCE("TPE:{code}")'
+    return f'=GOOGLEFINANCE("{symbol}")'
 
 
 def fetch_close_price(code: str, check_date: date):
-    """用 yfinance 取「檢查日（含）以前最近交易日」的收盤價（涵蓋上市 .TW 與上櫃 .TWO）。
+    """用 yfinance 取「檢查日（含）以前最近交易日」的收盤價。
+
+    台股試 .TW（上市）與 .TWO（上櫃）；美股代碼不加後綴，yfinance 直接支援。
+    注意美股收盤在台灣時間隔天凌晨，本程式在台灣時間 00:00 執行時美股尚在
+    盤中，因此美股取到的會是「前一個交易日」的收盤價（報告的日期欄會據實
+    標示該筆價格對應的交易日）。
 
     回傳浮點數；查不到（或資料是 NaN，例如剛上市、停牌）回傳 None。
     寫成固定數值，數字不會隨時間漂移。
@@ -489,7 +588,9 @@ def fetch_close_price(code: str, check_date: date):
     import math
     import yfinance as yf
     target = check_date.isoformat()
-    for suffix in (".TW", ".TWO"):  # 先試上市再試上櫃
+    # 美股代碼含英文字母（NVDA、BRK-B），台股是純 4 位數字
+    suffixes = ("",) if not code.isdigit() else (".TW", ".TWO")
+    for suffix in suffixes:
         try:
             hist = yf.Ticker(code + suffix).history(start="2026-06-01")
             if hist.empty:
