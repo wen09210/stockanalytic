@@ -103,5 +103,19 @@
     "title": "[閒聊] 2026/07/31 盤後閒聊",
     "url": "https://www.ptt.cc/bbs/Stock/M.1785477606.A.078.html",
     "pushes": 1476
+  },
+  "2026-08-02": {
+    "title": "[閒聊] 2026/07/31 盤後閒聊",
+    "url": "https://www.ptt.cc/bbs/Stock/M.1785477606.A.078.html",
+    "pushes": 1476,
+    "sentiment": {
+      "bullish": 87,
+      "bearish": 118,
+      "neutral": 1272,
+      "total": 1477,
+      "scored": 205,
+      "bullish_pct": 42.4,
+      "bearish_pct": 57.6
+    }
   }
 }
