@@ -28,6 +28,7 @@ from bs4 import BeautifulSoup
 import yfinance as yf
 
 import ptt_stock_tracker as t
+import ptt_stock_wordcloud as wc
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_OUT = os.path.join(BASE_DIR, "sheet_export.csv")
@@ -96,7 +97,8 @@ def main():
                 if c >= t.MIN_WORD_FREQ_TO_SHEET
             ],
         }
-        sources[day] = {"title": title, "url": url, "pushes": n_push}
+        sources[day] = {"title": title, "url": url, "pushes": n_push,
+                        "sentiment": wc.analyze_sentiment(texts)}
         print(f"{day}｜{title}｜採計 {n_push} 則推文｜"
               f"{len(hot)} 檔股票、{len(word_freq)} 個詞")
 

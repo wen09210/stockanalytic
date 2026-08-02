@@ -308,6 +308,8 @@ def main():
             wordcloud_path=wc_path,
             output_path=report_path,
             unrelated_words=unrelated,
+            # 情緒由爬蟲端算好存在 sources.json；舊資料沒這欄就傳 None 不顯示卡片
+            sentiment=(src or {}).get("sentiment"),
         )
 
     # 分頁器首頁（預設顯示最新一天）

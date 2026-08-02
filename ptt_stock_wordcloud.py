@@ -111,6 +111,81 @@ STOCK_TERM_WORDS = {
     "標普", "台幣", "美元", "匯率", "升息", "降息", "聯準會", "央行",
 }
 
+# ---- 市場情緒（樂觀／悲觀）詞庫 ----
+# 用詞典規則而非機器學習模型：股板用語有很強的固定句式，規則法就有不錯的
+# 效果，且不必為了跑 CI 而安裝深度學習套件、下載大模型。
+BULLISH_WORDS = {
+    "看多", "做多", "多方", "多單", "多軍", "買進", "買爆", "進場", "加碼",
+    "抄底", "撿便宜", "上漲", "漲停", "大漲", "飆漲", "噴出", "噴發", "起飛",
+    "突破", "新高", "反彈", "落底", "止跌", "轉強", "強勢", "領漲", "紅通通",
+    "樂觀", "看好", "有機會", "值得", "獲利", "賺錢", "賺翻", "大賺", "翻倍",
+    "軋空", "填息", "利多", "回溫", "復甦", "成長", "續強", "抱緊", "存股",
+}
+BEARISH_WORDS = {
+    "看空", "做空", "空方", "空單", "空軍", "賣出", "賣光", "出場", "減碼",
+    "停損", "認賠", "下跌", "跌停", "大跌", "崩盤", "崩跌", "暴跌", "重挫",
+    "破底", "新低", "轉弱", "弱勢", "領跌", "綠油油", "套牢", "住套房",
+    "悲觀", "看壞", "看衰", "危險", "小心", "賠錢", "賠慘", "虧損", "慘賠",
+    "逃命", "斷頭", "融資追繳", "違約交割", "利空", "衰退", "泡沫", "恐慌",
+    "血流成河", "韭菜", "接刀", "躺平", "認輸", "GG", "崩",
+}
+# 否定詞：出現在情緒詞前面時要翻轉極性（例如「不看好」其實是悲觀）
+_NEGATION_PREFIX = ("不", "沒", "別", "未", "難", "無", "沒有", "不會", "不要")
+
+
+def _is_negated(text: str, pos: int) -> bool:
+    """判斷 text[pos] 開頭的情緒詞前面是否有否定詞。"""
+    before = text[max(0, pos - 3):pos]
+    return before.endswith(_NEGATION_PREFIX)
+
+
+def _polarity_of(text: str) -> int:
+    """回傳單段文字的情緒傾向：1 樂觀、-1 悲觀、0 中性/看不出來。"""
+    bull = bear = 0
+    for words, is_bull in ((BULLISH_WORDS, True), (BEARISH_WORDS, False)):
+        for word in words:
+            for m in re.finditer(re.escape(word), text):
+                # 被否定就翻轉極性（不看好 → 悲觀；不看壞 → 樂觀）
+                positive = is_bull != _is_negated(text, m.start())
+                if positive:
+                    bull += 1
+                else:
+                    bear += 1
+    if bull > bear:
+        return 1
+    if bear > bull:
+        return -1
+    return 0
+
+
+def analyze_sentiment(texts: list[str]) -> dict:
+    """統計整體市場情緒，回傳樂觀／悲觀的則數與百分比。
+
+    以「每則推文（或內文）」為單位判斷極性，再統計比例。百分比的分母是
+    「有明確情緒的則數」（scored），不含中性則——這樣「今天樂觀 60%」指的是
+    有表態的人裡有六成偏多，而不會被大量閒聊稀釋掉。
+    """
+    bullish = bearish = neutral = 0
+    for text in texts:
+        p = _polarity_of(strip_urls(text))
+        if p > 0:
+            bullish += 1
+        elif p < 0:
+            bearish += 1
+        else:
+            neutral += 1
+
+    scored = bullish + bearish
+    return {
+        "bullish": bullish,
+        "bearish": bearish,
+        "neutral": neutral,
+        "total": len(texts),
+        "scored": scored,
+        "bullish_pct": round(bullish / scored * 100, 1) if scored else 0.0,
+        "bearish_pct": round(bearish / scored * 100, 1) if scored else 0.0,
+    }
+
 
 def classify_words(word_freq: Counter, extra_related=(),
                     min_freq: int = MIN_WORD_FREQ) -> tuple:
@@ -559,11 +634,14 @@ def generate_html_report(
     wordcloud_path: str,
     output_path: str,
     unrelated_words: Counter = None,
+    sentiment: dict = None,
 ) -> None:
     """把文字雲圖片與偵測到的股票整合成一頁深色交易平台風格的 HTML 報告。
 
     word_freq 應傳入「股票相關」詞頻（文字雲的內容）；
     unrelated_words 傳入被過濾掉的其他話題詞，會另列一區、不進文字雲。
+    sentiment 傳入 analyze_sentiment() 的結果，會多顯示一張市場情緒卡片；
+    傳 None（或舊資料沒有這欄）時就不顯示該卡片，保持向後相容。
     文字雲圖片以 base64 內嵌，報告為單一檔案、可直接用瀏覽器開啟或分享。
     """
     import base64
@@ -620,6 +698,34 @@ def generate_html_report(
         if symbol.endswith((".TW", ".TWO")):
             return f"https://tw.stock.yahoo.com/quote/{symbol}"
         return f"https://finance.yahoo.com/quote/{symbol}"
+
+    # --- 市場情緒卡片（樂觀／悲觀比例）---
+    # 顏色沿用台股慣例：紅＝樂觀（漲）、綠＝悲觀（跌）
+    sentiment_card = ""
+    if sentiment and sentiment.get("scored"):
+        bull_pct = sentiment["bullish_pct"]
+        bear_pct = sentiment["bearish_pct"]
+        if bull_pct - bear_pct >= 20:
+            mood, mood_cls = "偏樂觀", "up"
+        elif bear_pct - bull_pct >= 20:
+            mood, mood_cls = "偏悲觀", "down"
+        else:
+            mood, mood_cls = "分歧／中性", "flat"
+        sentiment_card = f"""
+  <div class="card">
+    <h2>Sentiment — 今日市場情緒 <span class="pill {mood_cls}">{mood}</span></h2>
+    <div class="senti-bar">
+      <div class="senti-bull" style="width:{bull_pct}%"></div>
+      <div class="senti-bear" style="width:{bear_pct}%"></div>
+    </div>
+    <div class="senti-legend">
+      <span class="senti-k"><b class="up">樂觀 {bull_pct}%</b>（{sentiment['bullish']} 則）</span>
+      <span class="senti-k"><b class="down">悲觀 {bear_pct}%</b>（{sentiment['bearish']} 則）</span>
+    </div>
+    <p class="meta">依情緒詞典判讀每則推文的語氣：{sentiment['total']} 則中有
+      {sentiment['scored']} 則可判讀（其餘 {sentiment['neutral']} 則為中性或看不出傾向），
+      百分比以可判讀的則數為分母｜規則法統計，僅供參考</p>
+  </div>"""
 
     # --- 頂部熱門標的卡片（提及次數前 5 名） ---
     top_cards = ""
@@ -722,6 +828,17 @@ def generate_html_report(
   .pill.up {{ background: rgba(246,70,93,.15); color: #f6465d; }}
   .pill.down {{ background: rgba(46,189,133,.15); color: #2ebd85; }}
   .pill.flat {{ background: rgba(132,142,156,.15); color: #848e9c; }}
+  /* --- 市場情緒（紅＝樂觀、綠＝悲觀，沿用台股漲跌配色）--- */
+  .senti-bar {{
+    display: flex; height: 22px; border-radius: 999px; overflow: hidden;
+    background: rgba(132,142,156,.15); margin: 4px 0 12px;
+  }}
+  .senti-bull {{ background: #f6465d; }}
+  .senti-bear {{ background: #2ebd85; }}
+  .senti-legend {{ display: flex; gap: 20px; flex-wrap: wrap; font-size: .88rem; }}
+  .senti-k {{ color: #848e9c; font-variant-numeric: tabular-nums; }}
+  .senti-k b.up {{ color: #f6465d; }}
+  .senti-k b.down {{ color: #2ebd85; }}
   /* --- 高頻詞標籤 --- */
   .tag {{
     display: inline-block; background: rgba(46,189,133,.1);
@@ -770,6 +887,8 @@ def generate_html_report(
 
   <div class="cards-row">{top_cards}
   </div>
+
+{sentiment_card}
 
   <div class="card">
     <h2>Hot List — 鄉民提及標的</h2>
@@ -848,6 +967,7 @@ def main():
         wordcloud_path=WORDCLOUD_OUTPUT,
         output_path=REPORT_OUTPUT,
         unrelated_words=unrelated,
+        sentiment=analyze_sentiment(all_texts),
     )
 
 

@@ -673,8 +673,13 @@ def write_to_google_sheets(stock_rows: list[list], word_rows: list[list],
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
-def _record_source(day: str, article: dict, push_count: int) -> None:
-    """把當天分析的 PTT 文章連結寫入 sources.json（報告的參考資料來源）。"""
+def _record_source(day: str, article: dict, push_count: int,
+                   sentiment: dict = None) -> None:
+    """把當天分析的 PTT 文章連結與市場情緒寫入 sources.json。
+
+    情緒是從當天的推文原文算出來的，只有爬蟲這一端拿得到；報告是由
+    report_from_sheet.py 讀試算表重建的，所以要在這裡順便存下來傳過去。
+    """
     import json
     path = os.path.join(BASE_DIR, "sources.json")
     data = {}
@@ -683,6 +688,8 @@ def _record_source(day: str, article: dict, push_count: int) -> None:
             data = json.load(f)
     data[day] = {"title": article["title"], "url": article["url"],
                  "pushes": push_count}
+    if sentiment:
+        data[day]["sentiment"] = sentiment
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -727,8 +734,17 @@ def main():
                 )
             time.sleep(30)
 
+    # 市場情緒（樂觀／悲觀比例）：只有這裡拿得到推文原文，算好一起存進
+    # sources.json，之後 report_from_sheet.py 重建報告時才有得用
+    from ptt_stock_wordcloud import analyze_sentiment
+    sentiment = analyze_sentiment(all_texts)
+    print(f"[資訊] 市場情緒：樂觀 {sentiment['bullish_pct']}%"
+          f"（{sentiment['bullish']} 則）、悲觀 {sentiment['bearish_pct']}%"
+          f"（{sentiment['bearish']} 則），可判讀 {sentiment['scored']}"
+          f"/{sentiment['total']} 則")
+
     # 記錄今天的資料來源（PTT 文章連結）到 sources.json，供報告的參考資料使用
-    _record_source(today.isoformat(), pinned[0], push_total)
+    _record_source(today.isoformat(), pinned[0], push_total, sentiment)
 
     # --- 步驟 2：先載入台股清單（順便掛成 jieba 自訂詞典，避免公司名被拆開）---
     print("[資訊] 載入台股上市櫃清單...")
