@@ -711,20 +711,33 @@ def generate_html_report(
             mood, mood_cls = "偏悲觀", "down"
         else:
             mood, mood_cls = "分歧／中性", "flat"
+        # 一條線分成左右兩段：左悲觀（綠）、右樂觀（紅），百分比直接標在線上。
+        # 直接標示數字同時也是必要的「次要編碼」——紅綠對色盲者的區辨度不足
+        # （deutan ΔE 6.2），靠標籤才能不依賴顏色也讀得出來。
+        # 段落太窄時字塞不下，改標在線下方的說明列，不硬擠。
+        # 線上標整數比較好讀；用「100 減去另一邊」確保兩數相加剛好是 100，
+        # 不會因為各自四捨五入而出現 49%＋52% 這種看起來很怪的組合
+        bear_int = round(bear_pct)
+        bull_int = 100 - bear_int
+        LABEL_MIN = 18          # 佔比低於此值就不在線上標字
+        bear_label = (f'<span class="senti-t">{bear_int}% 悲觀</span>'
+                      if bear_pct >= LABEL_MIN else "")
+        bull_label = (f'<span class="senti-t">{bull_int}% 樂觀</span>'
+                      if bull_pct >= LABEL_MIN else "")
+        segs = ""
+        if bear_pct > 0:
+            segs += (f'<div class="senti-seg senti-bear" '
+                     f'style="width:{bear_pct}%">{bear_label}</div>')
+        if bull_pct > 0:
+            segs += (f'<div class="senti-seg senti-bull">{bull_label}</div>')
         sentiment_card = f"""
   <div class="card">
     <h2>Sentiment — 今日市場情緒 <span class="pill {mood_cls}">{mood}</span></h2>
-    <div class="senti-bar">
-      <div class="senti-bull" style="width:{bull_pct}%"></div>
-      <div class="senti-bear" style="width:{bear_pct}%"></div>
-    </div>
-    <div class="senti-legend">
-      <span class="senti-k"><b class="up">樂觀 {bull_pct}%</b>（{sentiment['bullish']} 則）</span>
-      <span class="senti-k"><b class="down">悲觀 {bear_pct}%</b>（{sentiment['bearish']} 則）</span>
-    </div>
-    <p class="meta">依情緒詞典判讀每則推文的語氣：{sentiment['total']} 則中有
-      {sentiment['scored']} 則可判讀（其餘 {sentiment['neutral']} 則為中性或看不出傾向），
-      百分比以可判讀的則數為分母｜規則法統計，僅供參考</p>
+    <div class="senti-bar">{segs}</div>
+    <p class="meta">
+      <b class="down">悲觀 {sentiment['bearish']} 則</b>　<b class="up">樂觀 {sentiment['bullish']} 則</b>　｜
+      依情緒詞典判讀每則推文的語氣：{sentiment['total']} 則中有 {sentiment['scored']} 則可判讀
+      （其餘 {sentiment['neutral']} 則為中性或看不出傾向），百分比以可判讀的則數為分母｜規則法統計，僅供參考</p>
   </div>"""
 
     # --- 頂部熱門標的卡片（提及次數前 5 名） ---
@@ -828,17 +841,27 @@ def generate_html_report(
   .pill.up {{ background: rgba(246,70,93,.15); color: #f6465d; }}
   .pill.down {{ background: rgba(46,189,133,.15); color: #2ebd85; }}
   .pill.flat {{ background: rgba(132,142,156,.15); color: #848e9c; }}
-  /* --- 市場情緒（紅＝樂觀、綠＝悲觀，沿用台股漲跌配色）--- */
+  /* --- 市場情緒：一條線，左悲觀（綠）右樂觀（紅），沿用台股漲跌配色 --- */
   .senti-bar {{
-    display: flex; height: 22px; border-radius: 999px; overflow: hidden;
-    background: rgba(132,142,156,.15); margin: 4px 0 12px;
+    display: flex; height: 30px; border-radius: 6px; overflow: hidden;
+    background: rgba(132,142,156,.15); margin: 6px 0 10px;
   }}
-  .senti-bull {{ background: #f6465d; }}
+  .senti-seg {{
+    display: flex; align-items: center; justify-content: center;
+    min-width: 0; overflow: hidden; white-space: nowrap;
+  }}
+  /* 悲觀段用行內 width 指定；樂觀段一律吃掉剩餘寬度（單獨存在時就填滿整條）*/
+  .senti-bull {{ background: #f6465d; flex: 1; }}
   .senti-bear {{ background: #2ebd85; }}
-  .senti-legend {{ display: flex; gap: 20px; flex-wrap: wrap; font-size: .88rem; }}
-  .senti-k {{ color: #848e9c; font-variant-numeric: tabular-nums; }}
-  .senti-k b.up {{ color: #f6465d; }}
-  .senti-k b.down {{ color: #2ebd85; }}
+  /* 兩段並存時才需要 2px 底色縫隙分隔（總寬才不會超過 100%）*/
+  .senti-seg + .senti-seg {{ margin-left: 2px; }}
+  /* 線上的直接標示：深色字壓在亮色塊上，確保對比 */
+  .senti-t {{
+    font-size: .82rem; font-weight: 700; color: #0b0e14;
+    font-variant-numeric: tabular-nums; padding: 0 8px;
+  }}
+  .meta b.up {{ color: #f6465d; }}
+  .meta b.down {{ color: #2ebd85; }}
   /* --- 高頻詞標籤 --- */
   .tag {{
     display: inline-block; background: rgba(46,189,133,.1);
