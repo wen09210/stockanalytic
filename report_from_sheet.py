@@ -201,67 +201,251 @@ def enrich_with_prices(stocks: list[dict], day: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 分頁器首頁：日期頁籤 + iframe 載入各日報告
+# 首頁：日期選擇器（日曆）+ iframe 載入該日報告
 # ---------------------------------------------------------------------------
 def write_tabbed_index(days: list, output_path: str) -> None:
-    """產生分頁器頁面：上方日期頁籤、下方 iframe 顯示選中日期的報告。"""
-    tabs = "".join(
-        f'<button class="tab{" active" if i == len(days) - 1 else ""}" '
-        f'data-src="report_{d}.html">{d}</button>'
-        for i, d in enumerate(days)
-    )
+    """產生首頁：頂端只顯示目前選中的日期，點下去開日曆挑其他日期。
+
+    日曆只讓「有報告的日期」可以點；沒有資料的日子會變灰不可選，
+    避免點了之後 iframe 載入不存在的檔案而空白。
+    """
+    import json
+
     latest = days[-1]
-    html = f"""<!DOCTYPE html>
+    # 用 token 取代而非 f-string：底下的 JS/CSS 有大量大括號，
+    # 用 f-string 得把每個括號都寫成兩倍，很容易漏改而產生難查的錯誤
+    html = _INDEX_TEMPLATE
+    html = html.replace("__DAYS_JSON__", json.dumps(days))
+    html = html.replace("__LATEST__", latest)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[完成] 首頁已儲存至 {output_path}（可選日期 {len(days)} 天）")
+
+
+_INDEX_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PTT Stock 熱門標的追蹤（每日）</title>
 <style>
-  * {{ box-sizing: border-box; margin: 0; }}
-  body {{
+  * { box-sizing: border-box; margin: 0; }
+  body {
     height: 100vh; display: flex; flex-direction: column;
     background: #131722; color: #d1d4dc;
     font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
-  }}
-  .tabbar {{
-    display: flex; align-items: center; gap: 6px; padding: 10px 16px;
+  }
+  .tabbar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
     border-bottom: 1px solid #2a2e39; flex-wrap: wrap;
-  }}
-  .brand {{
+  }
+  .brand {
     font-weight: 700; letter-spacing: .1em; color: #eaecef;
-    margin-right: 12px; font-size: .95rem;
-  }}
-  .tab {{
-    background: #1c2230; color: #848e9c; border: 1px solid #2a2e39;
-    border-radius: 8px; padding: 6px 16px; font-size: .85rem; cursor: pointer;
-    font-variant-numeric: tabular-nums;
-  }}
-  .tab:hover {{ color: #eaecef; border-color: #4a5568; }}
-  .tab.active {{ background: #2ebd85; border-color: #2ebd85; color: #0b0e14; font-weight: 700; }}
-  iframe {{ flex: 1; border: 0; width: 100%; background: #131722; }}
+    margin-right: 4px; font-size: .95rem;
+  }
+  /* --- 日期選擇器 --- */
+  .picker { position: relative; }
+  .datebtn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #2ebd85; border: 1px solid #2ebd85; color: #0b0e14;
+    border-radius: 8px; padding: 6px 14px; font-size: .85rem; font-weight: 700;
+    cursor: pointer; font-variant-numeric: tabular-nums;
+    font-family: inherit;
+  }
+  .datebtn:hover { filter: brightness(1.08); }
+  .datebtn .caret { font-size: .7rem; opacity: .8; }
+  .today-flag {
+    background: rgba(11,14,20,.18); border-radius: 999px;
+    padding: 1px 8px; font-size: .72rem;
+  }
+  /* 透明遮罩：iframe 會吃掉點擊事件，沒有它就無法「點報告區關閉日曆」 */
+  .scrim { position: fixed; inset: 0; z-index: 40; }
+  .scrim[hidden] { display: none; }
+  .cal {
+    position: absolute; top: calc(100% + 8px); left: 0; z-index: 50;
+    background: #1c2230; border: 1px solid #2a2e39; border-radius: 12px;
+    padding: 12px; width: 268px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  }
+  .cal[hidden] { display: none; }
+  .cal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .cal-title { font-size: .9rem; font-weight: 700; color: #eaecef; }
+  .cal-nav {
+    background: #131722; border: 1px solid #2a2e39; color: #d1d4dc;
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+    font-size: .9rem; line-height: 1; font-family: inherit;
+  }
+  .cal-nav:hover:not(:disabled) { border-color: #4a5568; color: #fff; }
+  .cal-nav:disabled { opacity: .3; cursor: default; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-wd {
+    text-align: center; font-size: .72rem; color: #848e9c;
+    padding: 4px 0 6px;
+  }
+  .cal-d {
+    aspect-ratio: 1; border: 0; border-radius: 8px; background: transparent;
+    color: #4a5568; font-size: .82rem; cursor: default;
+    font-variant-numeric: tabular-nums; font-family: inherit;
+  }
+  /* 有報告的日期才可點 */
+  .cal-d.has {
+    color: #d1d4dc; background: #131722; cursor: pointer; font-weight: 600;
+  }
+  .cal-d.has:hover { background: #2a3446; color: #fff; }
+  .cal-d.sel { background: #2ebd85; color: #0b0e14; font-weight: 700; }
+  .cal-empty { visibility: hidden; }
+  .cal-foot {
+    margin-top: 10px; font-size: .72rem; color: #848e9c; text-align: center;
+  }
+  iframe { flex: 1; border: 0; width: 100%; background: #131722; }
 </style>
 </head>
 <body>
+  <div class="scrim" id="scrim" hidden></div>
   <div class="tabbar">
     <span class="brand">📈 PTT STOCK 每日追蹤</span>
-    {tabs}
+    <div class="picker">
+      <button class="datebtn" id="datebtn" aria-haspopup="dialog" aria-expanded="false">
+        <span>📅</span><span id="datelabel"></span><span class="caret">▼</span>
+      </button>
+      <div class="cal" id="cal" role="dialog" aria-label="選擇日期" hidden>
+        <div class="cal-head">
+          <button class="cal-nav" id="prev" aria-label="上個月">‹</button>
+          <span class="cal-title" id="caltitle"></span>
+          <button class="cal-nav" id="next" aria-label="下個月">›</button>
+        </div>
+        <div class="cal-grid" id="calgrid"></div>
+        <div class="cal-foot">只有產出報告的日期可以選取</div>
+      </div>
+    </div>
   </div>
-  <iframe id="frame" src="report_{latest}.html"></iframe>
+  <iframe id="frame" src="report___LATEST__.html" title="每日報告"></iframe>
 <script>
-  document.querySelectorAll(".tab").forEach(btn => {{
-    btn.addEventListener("click", () => {{
-      document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      document.getElementById("frame").src = btn.dataset.src;
-    }});
-  }});
+  var DAYS = __DAYS_JSON__;
+  var LATEST = "__LATEST__";
+  var avail = new Set(DAYS);
+  var selected = LATEST;
+
+  var btn = document.getElementById("datebtn");
+  var label = document.getElementById("datelabel");
+  var cal = document.getElementById("cal");
+  var grid = document.getElementById("calgrid");
+  var title = document.getElementById("caltitle");
+  var prev = document.getElementById("prev");
+  var next = document.getElementById("next");
+  var frame = document.getElementById("frame");
+  var scrim = document.getElementById("scrim");
+
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function iso(y, m, d) { return y + "-" + pad(m + 1) + "-" + pad(d); }
+  function parse(s) {
+    var p = s.split("-");
+    return { y: +p[0], m: +p[1] - 1, d: +p[2] };
+  }
+
+  // 可選月份的範圍：不讓使用者翻到完全沒有資料的月份
+  var first = parse(DAYS[0]);
+  var last = parse(DAYS[DAYS.length - 1]);
+  var minIdx = first.y * 12 + first.m;
+  var maxIdx = last.y * 12 + last.m;
+
+  var view = parse(selected);
+  var viewY = view.y, viewM = view.m;
+
+  function setLabel() {
+    label.textContent = selected;
+    var flag = document.querySelector(".today-flag");
+    if (flag) flag.remove();
+    if (selected === LATEST) {
+      var s = document.createElement("span");
+      s.className = "today-flag";
+      s.textContent = "今天";
+      label.after(s);
+    }
+  }
+
+  function renderCal() {
+    title.textContent = viewY + " 年 " + (viewM + 1) + " 月";
+    var idx = viewY * 12 + viewM;
+    prev.disabled = idx <= minIdx;
+    next.disabled = idx >= maxIdx;
+
+    grid.textContent = "";
+    ["日", "一", "二", "三", "四", "五", "六"].forEach(function (w) {
+      var e = document.createElement("div");
+      e.className = "cal-wd";
+      e.textContent = w;
+      grid.appendChild(e);
+    });
+
+    var lead = new Date(viewY, viewM, 1).getDay();
+    var total = new Date(viewY, viewM + 1, 0).getDate();
+    for (var i = 0; i < lead; i++) {
+      var pad0 = document.createElement("button");
+      pad0.className = "cal-d cal-empty";
+      pad0.disabled = true;
+      grid.appendChild(pad0);
+    }
+    for (var d = 1; d <= total; d++) {
+      var key = iso(viewY, viewM, d);
+      var cell = document.createElement("button");
+      cell.className = "cal-d";
+      cell.textContent = d;
+      if (avail.has(key)) {
+        cell.classList.add("has");
+        if (key === selected) cell.classList.add("sel");
+        cell.dataset.day = key;
+      } else {
+        cell.disabled = true;      // 沒有報告的日子不可點
+      }
+      grid.appendChild(cell);
+    }
+  }
+
+  function openCal(open) {
+    cal.hidden = !open;
+    scrim.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      var v = parse(selected);
+      viewY = v.y; viewM = v.m;
+      renderCal();
+    }
+  }
+
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    openCal(cal.hidden);
+  });
+  cal.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var day = e.target.dataset && e.target.dataset.day;
+    if (!day) return;
+    selected = day;
+    frame.src = "report_" + day + ".html";
+    setLabel();
+    openCal(false);
+  });
+  prev.addEventListener("click", function () {
+    if (--viewM < 0) { viewM = 11; viewY--; }
+    renderCal();
+  });
+  next.addEventListener("click", function () {
+    if (++viewM > 11) { viewM = 0; viewY++; }
+    renderCal();
+  });
+  scrim.addEventListener("click", function () { openCal(false); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") openCal(false);
+  });
+
+  setLabel();
 </script>
 </body>
 </html>"""
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"[完成] 分頁器首頁已儲存至 {output_path}")
 
 
 def main():
