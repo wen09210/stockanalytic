@@ -459,13 +459,13 @@
     "url": "https://www.ptt.cc/bbs/Stock/M.1787896803.A.CBB.html",
     "pushes": 1489,
     "sentiment": {
-      "bullish": 61,
-      "bearish": 151,
-      "neutral": 1278,
+      "bullish": 42,
+      "bearish": 142,
+      "neutral": 1306,
       "total": 1490,
-      "scored": 212,
-      "bullish_pct": 28.8,
-      "bearish_pct": 71.2
+      "scored": 184,
+      "bullish_pct": 22.8,
+      "bearish_pct": 77.2
     }
   }
 }
