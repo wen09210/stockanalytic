@@ -1,12 +1,16 @@
 # PTT 股市熱門標的追蹤（stockanalytic）
 
-自動爬取 PTT Stock 板置底文章，分析鄉民討論熱度：jieba 斷詞產生文字雲、辨識被提及的台灣上市櫃股票與熱門美股並查詢股價，結果可輸出成深色交易平台風格的網頁報告，或記錄到 Google 試算表觀察每日變化。
+自動爬取 PTT Stock 板置底文章，分析鄉民討論熱度：jieba 斷詞產生文字雲、辨識被提及的台灣上市櫃股票與熱門美股並查詢股價，結果可輸出成單色印刷編輯風格（mono-color）的網頁報告，或記錄到 Google 試算表觀察每日變化。
 
 美股採「精選熱門清單」（`ptt_stock_tracker.py` 的 `US_STOCKS`，可自行增減），以中文暱稱為主、英文代碼為輔比對——刻意不抓全美股清單，因為 `ON`／`IT`／`ALL`／`NOW` 這類短代碼會與推文的英文縮寫大量誤撞。注意排程在台灣時間 00:00 執行時美股仍在盤中，故美股取到的是「前一交易日」收盤價（報告會據實標示該價格的交易日）。
 
 **🔗 線上報告：<https://wen09210.github.io/stockanalytic/>**
 
-![報告預覽](https://img.shields.io/badge/style-dark%20trading%20dashboard-131722)
+![報告預覽](https://img.shields.io/badge/style-mono--color%20editorial-30343A)
+
+報告採 **mono-color 單色印刷編輯風格**：Cool Gray 紙張基材 `#E9E9E5`，最多兩塊印版——碳墨 `#30343A` 承載內文、表格與格線，紅墨 `#C83232` 只給重點數字與強調。設計系統來源見 [`.claude/skills/mono-color/`](.claude/skills/mono-color/)（MIT，作者 Yan Liu），實際配方與取捨記在該目錄的 `ATTRIBUTION.md`。
+
+> 兩塊印版是硬限制，所以台股「紅漲綠跌」的綠會超出墨數。報告改為 **漲＝紅墨、跌＝碳墨**：紅漲慣例保留，漲跌兩色的對比也從 1.47:1 提升到 2.36:1。
 
 ## 專案結構
 
