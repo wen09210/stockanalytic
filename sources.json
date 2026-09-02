@@ -513,15 +513,15 @@
   "2026-09-02": {
     "title": "[閒聊] 2026/09/02 盤後閒聊",
     "url": "https://www.ptt.cc/bbs/Stock/M.1788328802.A.1EA.html",
-    "pushes": 187,
+    "pushes": 729,
     "sentiment": {
-      "bullish": 3,
-      "bearish": 16,
-      "neutral": 169,
-      "total": 188,
-      "scored": 19,
-      "bullish_pct": 15.8,
-      "bearish_pct": 84.2
+      "bullish": 31,
+      "bearish": 69,
+      "neutral": 630,
+      "total": 730,
+      "scored": 100,
+      "bullish_pct": 31.0,
+      "bearish_pct": 69.0
     }
   }
 }
