@@ -643,6 +643,233 @@ def _sparkline_svg(closes: list[float], up: bool) -> str:
     )
 
 
+# 報告頁與公開資訊頁共用的樣式表（mono-color 配方，詳見下方註解）。
+# 抽成常數是為了讓兩個頁面共用同一份，避免像 STOPWORDS 那樣各留一份而走鐘。
+_REPORT_CSS = """  /* ====== mono-color：ruled information poster ======================
+     本頁的視覺配方（依 .claude/skills/mono-color/ 的設計系統解析）：
+       substrate : Pale Beige #F5F1E8（型錄指定給 tactile / archive 類主題）
+       mode      : complementary duotone（型錄對此 palette 的定義）
+       palette   : Botanical Green #008A4B + Oxblood #8F3434
+       plate     : Oxblood 為主版（內文/表格/格線，內文用 #4A1F1F 高濃度）；
+                   Botanical Green 為輔版（跌、情緒悲觀段），佔比 15%-30%
+       layout    : ruled information poster（細格線構成 metadata band）
+       type      : Programmatic（數字為錨點、表格數字等寬對齊，字級落差 4:1-9:1）
+       gesture   : 僅一種——細格線；不再另加圓角卡片、陰影等裝飾
+     這組墨是唯一能容納台股「紅漲綠跌」的雙墨組合：漲＝Oxblood、跌＝綠墨。
+     綠墨用 #00753F（比型錄的 #008A4B 略濃）——型錄值在米色紙上只有 3.93:1，
+     小字不過 AA；提濃到 5.15:1 才夠。不再更濃是因為綠墨一旦壓深就會與
+     Oxblood 的明度重疊（漲跌對比會從 1.75:1 掉到 1.17:1）。紅綠本來就
+     難靠明度分辨，所以漲跌另有 ▲▼ 與正負號，不單靠顏色。
+     ================================================================= */
+  * { box-sizing: border-box; }
+  body {
+    /* Programmatic：display 用 grotesk，資訊與數字用等寬 */
+    font-family: "Helvetica Neue", Helvetica, "PingFang TC",
+                 "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    max-width: 1000px; margin: 0 auto;
+    padding: 6% 7% 9%;              /* 外緣留白 5%-9% */
+    line-height: 1.65;
+    background: #F5F1E8; color: #4A1F1F;
+  }
+  /* 字級落差：h1 約為 microcopy 的 5 倍以上 */
+  h1 {
+    font-size: 2.6rem; line-height: 1.05; letter-spacing: -.02em;
+    font-weight: 700; color: #4A1F1F; margin: 0;
+    /* 中文沒有詞間空白，不設 keep-all 會從任意字中間斷行
+       （曾出現「PTT STOCK 熱／門標的追蹤」這種斷法）。換行點由 <br> 決定。*/
+    word-break: keep-all;
+  }
+  h2 {
+    font-size: .72rem; margin: 0 0 16px; color: #4A1F1F; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .2em;
+  }
+  /* metadata band：標題與事實共用一條規則線 */
+  .topbar {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px; padding-bottom: 12px;
+    border-bottom: 2px solid #4A1F1F; margin-bottom: 8px;
+  }
+  .meta {
+    color: #4A1F1F; opacity: .62; font-size: .74rem; letter-spacing: .02em;
+    font-variant-numeric: tabular-nums;
+  }
+  /* 區塊之間靠格線分隔，不用卡片色塊——保持紙張外露 */
+  .card {
+    border-top: 1px solid rgba(74,31,31,.28);
+    padding: 26px 0 30px; margin: 0;
+  }
+  /* --- 頂部熱門標的：規則線分欄，不是卡片 --- */
+  .cards-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0; margin: 26px 0 4px;
+    border-top: 2px solid #4A1F1F; border-bottom: 1px solid rgba(74,31,31,.28);
+  }
+  .ticker-card {
+    padding: 14px 16px 16px; text-decoration: none; color: inherit;
+    border-left: 1px solid rgba(74,31,31,.18);
+  }
+  .ticker-card:first-child { border-left: 0; padding-left: 0; }
+  .ticker-card:hover { background: rgba(74,31,31,.05); }
+  .tc-name { font-size: .9rem; color: #4A1F1F; font-weight: 700; }
+  .tc-sym {
+    font-size: .66rem; opacity: .55; margin-left: 6px; font-weight: 400;
+    letter-spacing: .06em;
+  }
+  .tc-price {
+    font-size: 1.55rem; font-weight: 700; color: #4A1F1F; margin: 6px 0 8px;
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  }
+  .tc-row { display: flex; justify-content: space-between; align-items: center; }
+  .tc-mention { font-size: .74rem; color: #8F3434; font-variant-numeric: tabular-nums; }
+  /* --- 漲跌：紅墨＝漲（保留台股紅漲），碳墨＝跌 --- */
+  .pill {
+    display: inline-block; padding: 1px 7px; border: 1px solid;
+    font-size: .74rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .pill.up { color: #8F3434; border-color: #8F3434; }
+  .pill.down { color: #00753F; border-color: #00753F; }
+  .pill.flat { color: #4A1F1F; border-color: rgba(74,31,31,.22); opacity: .6; }
+  /* --- 市場情緒：一條線，左悲觀（碳墨）右樂觀（紅墨） --- */
+  .senti-bar {
+    display: flex; height: 34px; margin: 8px 0 12px;
+    background: rgba(74,31,31,.1); border: 1px solid rgba(74,31,31,.28);
+  }
+  .senti-seg {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 0; overflow: hidden; white-space: nowrap;
+  }
+  /* 悲觀段用行內 width 指定；樂觀段一律吃掉剩餘寬度（單獨存在時就填滿整條）*/
+  .senti-bull { background: #8F3434; flex: 1; }
+  .senti-bear { background: #00753F; }
+  /* 兩段並存時才需要 2px 紙色縫隙分隔（總寬才不會超過 100%）*/
+  .senti-seg + .senti-seg { margin-left: 2px; }
+  /* 線上的直接標示：紙色字壓在墨色塊上 */
+  .senti-t {
+    font-size: .8rem; font-weight: 700; color: #F5F1E8;
+    font-variant-numeric: tabular-nums; padding: 0 10px; letter-spacing: .04em;
+  }
+  .meta b.up { color: #8F3434; }
+  .meta b.down { color: #00753F; }
+  /* --- 高頻詞：紅墨為重點，碳墨為其他話題 --- */
+  .tag {
+    display: inline-block; border: 1px solid rgba(143,52,52,.45);
+    padding: 1px 10px; margin: 3px 4px 3px 0; font-size: .8rem; color: #4A1F1F;
+  }
+  .tag b { color: #8F3434; font-variant-numeric: tabular-nums; }
+  .tag.dim { border-color: rgba(74,31,31,.25); opacity: .72; }
+  .tag.dim b { color: #4A1F1F; }
+  /* --- 表格：只用橫向規則線 --- */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { padding: 9px 14px 9px 0; text-align: left; white-space: nowrap; }
+  th {
+    color: #4A1F1F; font-size: .66rem; text-transform: uppercase;
+    letter-spacing: .12em; border-bottom: 2px solid #4A1F1F; font-weight: 700;
+  }
+  tr { border-bottom: 1px solid rgba(74,31,31,.16); }
+  tbody tr:hover { background: rgba(74,31,31,.05); }
+  td.num { font-variant-numeric: tabular-nums; color: #4A1F1F; font-weight: 700; }
+  td.spark svg { display: block; }
+  td.dim { opacity: .55; font-size: .76rem; font-variant-numeric: tabular-nums; }
+  .tk { color: #4A1F1F; text-decoration: none; font-weight: 700; }
+  .tk:hover { color: #8F3434; }
+  .sym {
+    display: block; font-size: .66rem; opacity: .55; font-weight: 400;
+    letter-spacing: .06em;
+  }
+  /* --- PTT 熱度長條：純紅墨，無漸層 --- */
+  .mbar-wrap { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+  .mbar { height: 7px; min-width: 2px; background: #8F3434; }
+  .mnum { font-size: .76rem; color: #8F3434; font-variant-numeric: tabular-nums; }
+  ul { margin: 0; padding-left: 18px; }
+  a { color: #8F3434; }
+  img { max-width: 100%; display: block; }
+"""
+
+
+def generate_mops_report(news: list, day: str, output_path: str,
+                         sheet_url: str = "") -> None:
+    """產生「公開資訊觀測站」頁：當天熱門標的的重大訊息。
+
+    news 是 [{code, name, time, subject}, ...]（可為空）。
+    刻意與每日報告共用 _REPORT_CSS，兩頁視覺才不會各走各的。
+
+    當天沒有公告、或 MOPS 查詢失敗時都會走到同一個「無資料」畫面——這是
+    正常情況（多數個股多數日子本來就沒有重訊），不是錯誤。
+    """
+    from datetime import datetime, timezone, timedelta
+
+    tw_now = datetime.now(timezone(timedelta(hours=8)))
+    generated_at = tw_now.strftime("%Y-%m-%d %H:%M") + "（台灣時間）"
+
+    if news:
+        # 依公司分組，同一檔的公告收在一起比較好讀
+        by_code = {}
+        for n in news:
+            by_code.setdefault((n["code"], n["name"]), []).append(n)
+        blocks = []
+        for (code, name), items in by_code.items():
+            rows = "\n".join(
+                f"<tr><td class='dim'>{i['time'] or '—'}</td>"
+                f"<td>{i['subject']}</td></tr>"
+                for i in items
+            )
+            blocks.append(f"""
+  <div class="card">
+    <h2>{name} <span class="sym-inline">{code}</span></h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>發言時間</th><th>主旨</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table></div>
+  </div>""")
+        body = "".join(blocks)
+        summary = f"{len(news)} 則公告，來自 {len(by_code)} 家公司"
+    else:
+        body = """
+  <div class="card">
+    <p class="meta">當天這些標的沒有查到重大訊息。</p>
+    <p class="meta">多數個股在多數日子本來就沒有公告，這通常是正常結果；
+      若連續多日皆為空，才需要確認資料來源是否被擋。</p>
+  </div>"""
+        summary = "無公告"
+
+    src = (f'<li><a href="{sheet_url}" target="_blank">Google 試算表：資料來源</a></li>'
+           if sheet_url else "")
+    html = f"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公開資訊觀測站　重大訊息　{day}</title>
+<style>
+{_REPORT_CSS}
+  .sym-inline {{ font-size: .7rem; opacity: .55; letter-spacing: .06em;
+                 font-weight: 400; margin-left: 8px; }}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>公開資訊觀測站<br>重大訊息</h1>
+    <span class="meta">{day}｜{summary}｜產生時間 {generated_at}</span>
+  </div>
+{body}
+
+  <div class="card">
+    <h2>Sources — 資料來源</h2>
+    <ul>
+      <li><a href="https://mops.twse.com.tw/mops/web/t05st01" target="_blank">
+        公開資訊觀測站　重大訊息查詢</a></li>
+      {src}
+    </ul>
+    <p class="meta">只查詢當天 PTT 熱門標的中的台股，非全市場公告。</p>
+  </div>
+</body>
+</html>"""
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[完成] 公開資訊頁已儲存至 {output_path}（{summary}）")
+
+
 def generate_html_report(
     board: str,
     articles: list[dict],
@@ -809,146 +1036,7 @@ def generate_html_report(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PTT {board} 熱門標的追蹤</title>
 <style>
-  /* ====== mono-color：ruled information poster ======================
-     本頁的視覺配方（依 .claude/skills/mono-color/ 的設計系統解析）：
-       substrate : Pale Beige #F5F1E8（型錄指定給 tactile / archive 類主題）
-       mode      : complementary duotone（型錄對此 palette 的定義）
-       palette   : Botanical Green #008A4B + Oxblood #8F3434
-       plate     : Oxblood 為主版（內文/表格/格線，內文用 #4A1F1F 高濃度）；
-                   Botanical Green 為輔版（跌、情緒悲觀段），佔比 15%-30%
-       layout    : ruled information poster（細格線構成 metadata band）
-       type      : Programmatic（數字為錨點、表格數字等寬對齊，字級落差 4:1-9:1）
-       gesture   : 僅一種——細格線；不再另加圓角卡片、陰影等裝飾
-     這組墨是唯一能容納台股「紅漲綠跌」的雙墨組合：漲＝Oxblood、跌＝綠墨。
-     綠墨用 #00753F（比型錄的 #008A4B 略濃）——型錄值在米色紙上只有 3.93:1，
-     小字不過 AA；提濃到 5.15:1 才夠。不再更濃是因為綠墨一旦壓深就會與
-     Oxblood 的明度重疊（漲跌對比會從 1.75:1 掉到 1.17:1）。紅綠本來就
-     難靠明度分辨，所以漲跌另有 ▲▼ 與正負號，不單靠顏色。
-     ================================================================= */
-  * {{ box-sizing: border-box; }}
-  body {{
-    /* Programmatic：display 用 grotesk，資訊與數字用等寬 */
-    font-family: "Helvetica Neue", Helvetica, "PingFang TC",
-                 "Noto Sans TC", "Microsoft JhengHei", sans-serif;
-    max-width: 1000px; margin: 0 auto;
-    padding: 6% 7% 9%;              /* 外緣留白 5%-9% */
-    line-height: 1.65;
-    background: #F5F1E8; color: #4A1F1F;
-  }}
-  /* 字級落差：h1 約為 microcopy 的 5 倍以上 */
-  h1 {{
-    font-size: 2.6rem; line-height: 1.05; letter-spacing: -.02em;
-    font-weight: 700; color: #4A1F1F; margin: 0;
-    /* 中文沒有詞間空白，不設 keep-all 會從任意字中間斷行
-       （曾出現「PTT STOCK 熱／門標的追蹤」這種斷法）。換行點由 <br> 決定。*/
-    word-break: keep-all;
-  }}
-  h2 {{
-    font-size: .72rem; margin: 0 0 16px; color: #4A1F1F; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .2em;
-  }}
-  /* metadata band：標題與事實共用一條規則線 */
-  .topbar {{
-    display: flex; align-items: flex-end; justify-content: space-between;
-    flex-wrap: wrap; gap: 16px; padding-bottom: 12px;
-    border-bottom: 2px solid #4A1F1F; margin-bottom: 8px;
-  }}
-  .meta {{
-    color: #4A1F1F; opacity: .62; font-size: .74rem; letter-spacing: .02em;
-    font-variant-numeric: tabular-nums;
-  }}
-  /* 區塊之間靠格線分隔，不用卡片色塊——保持紙張外露 */
-  .card {{
-    border-top: 1px solid rgba(74,31,31,.28);
-    padding: 26px 0 30px; margin: 0;
-  }}
-  /* --- 頂部熱門標的：規則線分欄，不是卡片 --- */
-  .cards-row {{
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 0; margin: 26px 0 4px;
-    border-top: 2px solid #4A1F1F; border-bottom: 1px solid rgba(74,31,31,.28);
-  }}
-  .ticker-card {{
-    padding: 14px 16px 16px; text-decoration: none; color: inherit;
-    border-left: 1px solid rgba(74,31,31,.18);
-  }}
-  .ticker-card:first-child {{ border-left: 0; padding-left: 0; }}
-  .ticker-card:hover {{ background: rgba(74,31,31,.05); }}
-  .tc-name {{ font-size: .9rem; color: #4A1F1F; font-weight: 700; }}
-  .tc-sym {{
-    font-size: .66rem; opacity: .55; margin-left: 6px; font-weight: 400;
-    letter-spacing: .06em;
-  }}
-  .tc-price {{
-    font-size: 1.55rem; font-weight: 700; color: #4A1F1F; margin: 6px 0 8px;
-    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
-  }}
-  .tc-row {{ display: flex; justify-content: space-between; align-items: center; }}
-  .tc-mention {{ font-size: .74rem; color: #8F3434; font-variant-numeric: tabular-nums; }}
-  /* --- 漲跌：紅墨＝漲（保留台股紅漲），碳墨＝跌 --- */
-  .pill {{
-    display: inline-block; padding: 1px 7px; border: 1px solid;
-    font-size: .74rem; font-weight: 700; font-variant-numeric: tabular-nums;
-  }}
-  .pill.up {{ color: #8F3434; border-color: #8F3434; }}
-  .pill.down {{ color: #00753F; border-color: #00753F; }}
-  .pill.flat {{ color: #4A1F1F; border-color: rgba(74,31,31,.22); opacity: .6; }}
-  /* --- 市場情緒：一條線，左悲觀（碳墨）右樂觀（紅墨） --- */
-  .senti-bar {{
-    display: flex; height: 34px; margin: 8px 0 12px;
-    background: rgba(74,31,31,.1); border: 1px solid rgba(74,31,31,.28);
-  }}
-  .senti-seg {{
-    display: flex; align-items: center; justify-content: center;
-    min-width: 0; overflow: hidden; white-space: nowrap;
-  }}
-  /* 悲觀段用行內 width 指定；樂觀段一律吃掉剩餘寬度（單獨存在時就填滿整條）*/
-  .senti-bull {{ background: #8F3434; flex: 1; }}
-  .senti-bear {{ background: #00753F; }}
-  /* 兩段並存時才需要 2px 紙色縫隙分隔（總寬才不會超過 100%）*/
-  .senti-seg + .senti-seg {{ margin-left: 2px; }}
-  /* 線上的直接標示：紙色字壓在墨色塊上 */
-  .senti-t {{
-    font-size: .8rem; font-weight: 700; color: #F5F1E8;
-    font-variant-numeric: tabular-nums; padding: 0 10px; letter-spacing: .04em;
-  }}
-  .meta b.up {{ color: #8F3434; }}
-  .meta b.down {{ color: #00753F; }}
-  /* --- 高頻詞：紅墨為重點，碳墨為其他話題 --- */
-  .tag {{
-    display: inline-block; border: 1px solid rgba(143,52,52,.45);
-    padding: 1px 10px; margin: 3px 4px 3px 0; font-size: .8rem; color: #4A1F1F;
-  }}
-  .tag b {{ color: #8F3434; font-variant-numeric: tabular-nums; }}
-  .tag.dim {{ border-color: rgba(74,31,31,.25); opacity: .72; }}
-  .tag.dim b {{ color: #4A1F1F; }}
-  /* --- 表格：只用橫向規則線 --- */
-  .tablewrap {{ overflow-x: auto; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: .85rem; }}
-  th, td {{ padding: 9px 14px 9px 0; text-align: left; white-space: nowrap; }}
-  th {{
-    color: #4A1F1F; font-size: .66rem; text-transform: uppercase;
-    letter-spacing: .12em; border-bottom: 2px solid #4A1F1F; font-weight: 700;
-  }}
-  tr {{ border-bottom: 1px solid rgba(74,31,31,.16); }}
-  tbody tr:hover {{ background: rgba(74,31,31,.05); }}
-  td.num {{ font-variant-numeric: tabular-nums; color: #4A1F1F; font-weight: 700; }}
-  td.spark svg {{ display: block; }}
-  td.dim {{ opacity: .55; font-size: .76rem; font-variant-numeric: tabular-nums; }}
-  .tk {{ color: #4A1F1F; text-decoration: none; font-weight: 700; }}
-  .tk:hover {{ color: #8F3434; }}
-  .sym {{
-    display: block; font-size: .66rem; opacity: .55; font-weight: 400;
-    letter-spacing: .06em;
-  }}
-  /* --- PTT 熱度長條：純紅墨，無漸層 --- */
-  .mbar-wrap {{ display: flex; align-items: center; gap: 8px; min-width: 110px; }}
-  .mbar {{ height: 7px; min-width: 2px; background: #8F3434; }}
-  .mnum {{ font-size: .76rem; color: #8F3434; font-variant-numeric: tabular-nums; }}
-  ul {{ margin: 0; padding-left: 18px; }}
-  a {{ color: #8F3434; }}
-  img {{ max-width: 100%; display: block; }}
-</style>
+{_REPORT_CSS}</style>
 </head>
 <body>
   <div class="topbar">
