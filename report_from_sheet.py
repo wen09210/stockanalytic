@@ -229,36 +229,36 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PTT Stock 熱門標的追蹤（每日）</title>
 <style>
-  /* mono-color：紙張 Cool Gray #E9E9E5、碳墨 #30343A、紅墨 #C83232。
+  /* mono-color：紙張 Pale Beige #F5F1E8、Oxblood #4A1F1F/#8F3434、綠墨 #00753F。
      與報告內頁同一套配方，見 .claude/skills/mono-color/ATTRIBUTION.md */
   * { box-sizing: border-box; margin: 0; }
   body {
     height: 100vh; display: flex; flex-direction: column;
-    background: #E9E9E5; color: #30343A;
+    background: #F5F1E8; color: #4A1F1F;
     font-family: "Helvetica Neue", Helvetica, "PingFang TC",
                  "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   }
   .tabbar {
     display: flex; align-items: center; gap: 14px; padding: 12px 20px;
-    border-bottom: 2px solid #30343A; flex-wrap: wrap;
+    border-bottom: 2px solid #4A1F1F; flex-wrap: wrap;
   }
   .brand {
-    font-weight: 700; letter-spacing: .18em; color: #30343A;
+    font-weight: 700; letter-spacing: .18em; color: #4A1F1F;
     margin-right: 4px; font-size: .78rem; text-transform: uppercase;
   }
   /* --- 日期選擇器 --- */
   .picker { position: relative; }
   .datebtn {
     display: inline-flex; align-items: center; gap: 8px;
-    background: #C83232; border: 1px solid #C83232; color: #E9E9E5;
+    background: #8F3434; border: 1px solid #8F3434; color: #F5F1E8;
     padding: 6px 14px; font-size: .82rem; font-weight: 700;
     cursor: pointer; font-variant-numeric: tabular-nums;
     font-family: inherit; letter-spacing: .04em;
   }
-  .datebtn:hover { background: #30343A; border-color: #30343A; }
+  .datebtn:hover { background: #4A1F1F; border-color: #4A1F1F; }
   .datebtn .caret { font-size: .66rem; opacity: .75; }
   .today-flag {
-    border: 1px solid rgba(233,233,229,.5);
+    border: 1px solid rgba(245,241,232,.5);
     padding: 0 7px; font-size: .68rem; letter-spacing: .08em;
   }
   /* 透明遮罩：iframe 會吃掉點擊事件，沒有它就無法「點報告區關閉日曆」 */
@@ -266,50 +266,50 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
   .scrim[hidden] { display: none; }
   .cal {
     position: absolute; top: calc(100% + 8px); left: 0; z-index: 50;
-    background: #E9E9E5; border: 2px solid #30343A;
+    background: #F5F1E8; border: 2px solid #4A1F1F;
     padding: 14px; width: 268px;
   }
   .cal[hidden] { display: none; }
   .cal-head {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 10px; padding-bottom: 8px;
-    border-bottom: 1px solid rgba(48,52,58,.28);
+    border-bottom: 1px solid rgba(74,31,31,.28);
   }
   .cal-title {
-    font-size: .82rem; font-weight: 700; color: #30343A;
+    font-size: .82rem; font-weight: 700; color: #4A1F1F;
     font-variant-numeric: tabular-nums; letter-spacing: .04em;
   }
   .cal-nav {
-    background: transparent; border: 1px solid rgba(48,52,58,.4); color: #30343A;
+    background: transparent; border: 1px solid rgba(74,31,31,.4); color: #4A1F1F;
     width: 26px; height: 26px; cursor: pointer;
     font-size: .9rem; line-height: 1; font-family: inherit;
   }
-  .cal-nav:hover:not(:disabled) { background: #30343A; color: #E9E9E5; }
+  .cal-nav:hover:not(:disabled) { background: #4A1F1F; color: #F5F1E8; }
   .cal-nav:disabled { opacity: .25; cursor: default; }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
   .cal-wd {
-    text-align: center; font-size: .66rem; color: #30343A; opacity: .55;
+    text-align: center; font-size: .66rem; color: #4A1F1F; opacity: .55;
     padding: 4px 0 6px; letter-spacing: .06em;
   }
   .cal-d {
     aspect-ratio: 1; border: 0; background: transparent;
-    color: rgba(48,52,58,.3); font-size: .8rem; cursor: default;
+    color: rgba(74,31,31,.3); font-size: .8rem; cursor: default;
     font-variant-numeric: tabular-nums; font-family: inherit;
   }
   /* 有報告的日期才可點 */
   .cal-d.has {
-    color: #30343A; border: 1px solid rgba(48,52,58,.28);
+    color: #4A1F1F; border: 1px solid rgba(74,31,31,.28);
     cursor: pointer; font-weight: 700;
   }
-  .cal-d.has:hover { background: #30343A; color: #E9E9E5; }
-  .cal-d.sel { background: #C83232; border-color: #C83232; color: #E9E9E5; }
+  .cal-d.has:hover { background: #4A1F1F; color: #F5F1E8; }
+  .cal-d.sel { background: #8F3434; border-color: #8F3434; color: #F5F1E8; }
   .cal-empty { visibility: hidden; }
   .cal-foot {
     margin-top: 10px; padding-top: 8px; font-size: .68rem;
-    border-top: 1px solid rgba(48,52,58,.28);
-    color: #30343A; opacity: .55; text-align: center;
+    border-top: 1px solid rgba(74,31,31,.28);
+    color: #4A1F1F; opacity: .55; text-align: center;
   }
-  iframe { flex: 1; border: 0; width: 100%; background: #E9E9E5; }
+  iframe { flex: 1; border: 0; width: 100%; background: #F5F1E8; }
 </style>
 </head>
 <body>

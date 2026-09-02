@@ -6,11 +6,11 @@
 
 **🔗 線上報告：<https://wen09210.github.io/stockanalytic/>**
 
-![報告預覽](https://img.shields.io/badge/style-mono--color%20editorial-30343A)
+![報告預覽](https://img.shields.io/badge/style-mono--color%20editorial-8F3434)
 
-報告採 **mono-color 單色印刷編輯風格**：Cool Gray 紙張基材 `#E9E9E5`，最多兩塊印版——碳墨 `#30343A` 承載內文、表格與格線，紅墨 `#C83232` 只給重點數字與強調。設計系統來源見 [`.claude/skills/mono-color/`](.claude/skills/mono-color/)（MIT，作者 Yan Liu），實際配方與取捨記在該目錄的 `ATTRIBUTION.md`。
+報告採 **mono-color 單色印刷編輯風格**：Pale Beige 紙張基材 `#F5F1E8`，最多兩塊印版——Oxblood `#8F3434` 為主版（內文用 `#4A1F1F` 高濃度，承載表格與格線），Botanical Green `#00753F` 為輔版。設計系統來源見 [`.claude/skills/mono-color/`](.claude/skills/mono-color/)（MIT，作者 Yan Liu），實際配方與取捨記在該目錄的 `ATTRIBUTION.md`。
 
-> 兩塊印版是硬限制，所以台股「紅漲綠跌」的綠會超出墨數。報告改為 **漲＝紅墨、跌＝碳墨**：紅漲慣例保留，漲跌兩色的對比也從 1.47:1 提升到 2.36:1。
+> 這組墨是唯一能同時容納台股「紅漲綠跌」的雙墨組合：**漲＝Oxblood、跌＝綠墨**。紅綠難靠明度分辨，因此漲跌另有 ▲▼ 與正負號，不單靠顏色。
 
 ## 專案結構
 
