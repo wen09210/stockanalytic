@@ -439,20 +439,30 @@ def draw_wordcloud(word_freq: Counter, output_path: str) -> None:
     font_path = find_chinese_font()
     print(f"[資訊] 使用中文字型：{font_path}")
 
+    # mono-color 配方：紙張為底、兩塊印版。碳墨承載絕大多數字詞，紅墨只給
+    # 最高頻的少數幾個當重點（accent 佔比控制在 15%-30%，不做純裝飾）。
+    ranked = [w for w, _ in word_freq.most_common()]
+    accent_n = max(1, round(len(ranked) * 0.2))
+    accent_words = set(ranked[:accent_n])
+
+    def ink(word, **_kwargs):
+        return "#C83232" if word in accent_words else "#30343A"
+
     wc = WordCloud(
         font_path=font_path,      # 中文字型（沒設定會變成方框亂碼）
         width=1200,
         height=800,
-        background_color="#131722",  # 深色底，配合交易平台風格的網頁報告
-        colormap="summer",           # 綠色系文字
-        max_words=len(word_freq),    # 不設上限，讓所有字詞都能進文字雲
+        background_color="#E9E9E5",   # Cool Gray 紙張基材
+        color_func=ink,               # 兩塊印版：碳墨為主、紅墨為重點
+        max_words=len(word_freq),     # 不設上限，讓所有字詞都能進文字雲
     ).generate_from_frequencies(word_freq)
 
     plt.figure(figsize=(12, 8))
     plt.imshow(wc, interpolation="bilinear")
     plt.axis("off")               # 不顯示座標軸
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
+    # 存檔時保留紙張底色，避免四周出現白框而破壞紙感
+    plt.savefig(output_path, dpi=150, facecolor="#E9E9E5")
     plt.close()
     print(f"[完成] 文字雲已儲存至 {output_path}")
 
@@ -617,18 +627,16 @@ def _sparkline_svg(closes: list[float], up: bool) -> str:
         y = h - pad - (c - lo) * (h - 2 * pad) / span
         pts.append(f"{x:.1f},{y:.1f}")
     line = " ".join(pts)
-    color = "#f6465d" if up else "#2ebd85"  # 台股慣例：紅漲綠跌
-    gid = f"g{'u' if up else 'd'}"
-    # 面積 = 折線 + 右下、左下兩個角點閉合
+    # 兩塊印版：漲＝紅墨（保留台股紅漲慣例）、跌＝碳墨
+    color = "#C83232" if up else "#30343A"
+    # 面積 = 折線 + 右下、左下兩個角點閉合。
+    # 用單一低不透明度的平塗而非漸層——mono-color 明列禁止漸層，
+    # 印刷上也只有墨量濃淡、沒有漸變。
     area = f"{line} {w - pad},{h} {pad},{h}"
     return (
         f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
         f'xmlns="http://www.w3.org/2000/svg">'
-        f'<defs><linearGradient id="{gid}" x1="0" y1="0" x2="0" y2="1">'
-        f'<stop offset="0%" stop-color="{color}" stop-opacity=".45"/>'
-        f'<stop offset="100%" stop-color="{color}" stop-opacity="0"/>'
-        f'</linearGradient></defs>'
-        f'<polygon points="{area}" fill="url(#{gid})"/>'
+        f'<polygon points="{area}" fill="{color}" fill-opacity=".16"/>'
         f'<polyline points="{line}" fill="none" stroke="{color}" '
         f'stroke-width="1.6" stroke-linejoin="round"/></svg>'
     )
@@ -644,7 +652,7 @@ def generate_html_report(
     unrelated_words: Counter = None,
     sentiment: dict = None,
 ) -> None:
-    """把文字雲圖片與偵測到的股票整合成一頁深色交易平台風格的 HTML 報告。
+    """把文字雲圖片與偵測到的股票整合成一頁 mono-color 單色印刷風格的 HTML 報告。
 
     word_freq 應傳入「股票相關」詞頻（文字雲的內容）；
     unrelated_words 傳入被過濾掉的其他話題詞，會另列一區、不進文字雲。
@@ -757,7 +765,7 @@ def generate_html_report(
         <div class="tc-name">{s['name']}<span class="tc-sym">{s['symbol']}</span></div>
         <div class="tc-price">{s['price']:,.2f}</div>
         <div class="tc-row">{chg_pill(s['change_pct'])}
-          <span class="tc-mention">🔥 {s['mentions']}</span></div>
+          <span class="tc-mention">{s['mentions']} 提及</span></div>
       </a>"""
 
     # --- 股票表格列（已依提及次數排序） ---
@@ -800,119 +808,147 @@ def generate_html_report(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PTT {board} 熱門標的追蹤</title>
 <style>
-  /* ====== 深色交易平台風格 ====== */
+  /* ====== mono-color：ruled information poster ======================
+     本頁的視覺配方（依 .claude/skills/mono-color/ 的設計系統解析）：
+       substrate : Cool Gray #E9E9E5（型錄指定給 technology / charcoal-led systems）
+       mode      : chromatic + black（碳墨承載長文與精密標籤）
+       palette   : Charcoal #30343A + Signal Red #C83232（型錄明列適用 reports）
+       plate     : 碳墨＝內文/表格/格線；紅墨＝重點數字與強調，佔比控制在 15%-30%
+       layout    : ruled information poster（細格線構成 metadata band）
+       type      : Programmatic（數字為錨點、表格數字等寬對齊，字級落差 4:1-9:1）
+       gesture   : 僅一種——細格線；不再另加圓角卡片、陰影等裝飾
+     注意：兩塊印版是硬限制，所以沒有第三個顏色。台股「紅漲綠跌」的綠會變成
+     第三個墨，因此改為 漲＝紅墨、跌＝碳墨（紅漲慣例保留，且漲跌對比從
+     1.47:1 提升到 2.36:1；另有 ▲▼ 與文字標示，不單靠顏色分辨）。
+     ================================================================= */
   * {{ box-sizing: border-box; }}
   body {{
-    font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
-    max-width: 1080px; margin: 0 auto; padding: 24px 16px; line-height: 1.6;
-    background: #131722; color: #d1d4dc;
+    /* Programmatic：display 用 grotesk，資訊與數字用等寬 */
+    font-family: "Helvetica Neue", Helvetica, "PingFang TC",
+                 "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    max-width: 1000px; margin: 0 auto;
+    padding: 6% 7% 9%;              /* 外緣留白 5%-9% */
+    line-height: 1.65;
+    background: #E9E9E5; color: #30343A;
   }}
-  h1 {{ font-size: 1.35rem; letter-spacing: .12em; color: #eaecef; margin: 0; }}
+  /* 字級落差：h1 約為 microcopy 的 5 倍以上 */
+  h1 {{
+    font-size: 2.6rem; line-height: 1.05; letter-spacing: -.02em;
+    font-weight: 700; color: #30343A; margin: 0;
+    /* 中文沒有詞間空白，不設 keep-all 會從任意字中間斷行
+       （曾出現「PTT STOCK 熱／門標的追蹤」這種斷法）。換行點由 <br> 決定。*/
+    word-break: keep-all;
+  }}
   h2 {{
-    font-size: .8rem; margin: 0 0 14px; color: #848e9c;
-    text-transform: uppercase; letter-spacing: .22em;
+    font-size: .72rem; margin: 0 0 16px; color: #30343A; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .2em;
   }}
+  /* metadata band：標題與事實共用一條規則線 */
   .topbar {{
-    display: flex; align-items: baseline; justify-content: space-between;
-    flex-wrap: wrap; gap: 8px; padding-bottom: 14px;
-    border-bottom: 1px solid #2a2e39; margin-bottom: 18px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px; padding-bottom: 12px;
+    border-bottom: 2px solid #30343A; margin-bottom: 8px;
   }}
-  .meta {{ color: #5e6673; font-size: .8rem; }}
-  .card {{
-    background: #1c2230; border: 1px solid #2a2e39; border-radius: 10px;
-    padding: 18px 22px; margin: 16px 0;
-  }}
-  /* --- 頂部熱門標的卡片 --- */
-  .cards-row {{
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px; margin: 16px 0;
-  }}
-  .ticker-card {{
-    background: #1c2230; border: 1px solid #2a2e39; border-radius: 10px;
-    padding: 14px 16px; text-decoration: none; color: inherit;
-    transition: border-color .15s;
-  }}
-  .ticker-card:hover {{ border-color: #4a5568; }}
-  .tc-name {{ font-size: .95rem; color: #eaecef; font-weight: 600; }}
-  .tc-sym {{ font-size: .7rem; color: #5e6673; margin-left: 6px; font-weight: 400; }}
-  .tc-price {{
-    font-size: 1.3rem; font-weight: 700; color: #eaecef; margin: 4px 0;
+  .meta {{
+    color: #30343A; opacity: .62; font-size: .74rem; letter-spacing: .02em;
     font-variant-numeric: tabular-nums;
   }}
-  .tc-row {{ display: flex; justify-content: space-between; align-items: center; }}
-  .tc-mention {{ font-size: .8rem; color: #f0b90b; }}
-  /* --- 漲跌幅膠囊（台股慣例：紅漲綠跌） --- */
-  .pill {{
-    display: inline-block; border-radius: 5px; padding: 1px 8px;
-    font-size: .8rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  /* 區塊之間靠格線分隔，不用卡片色塊——保持紙張外露 */
+  .card {{
+    border-top: 1px solid rgba(48,52,58,.28);
+    padding: 26px 0 30px; margin: 0;
   }}
-  .pill.up {{ background: rgba(246,70,93,.15); color: #f6465d; }}
-  .pill.down {{ background: rgba(46,189,133,.15); color: #2ebd85; }}
-  .pill.flat {{ background: rgba(132,142,156,.15); color: #848e9c; }}
-  /* --- 市場情緒：一條線，左悲觀（綠）右樂觀（紅），沿用台股漲跌配色 --- */
+  /* --- 頂部熱門標的：規則線分欄，不是卡片 --- */
+  .cards-row {{
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0; margin: 26px 0 4px;
+    border-top: 2px solid #30343A; border-bottom: 1px solid rgba(48,52,58,.28);
+  }}
+  .ticker-card {{
+    padding: 14px 16px 16px; text-decoration: none; color: inherit;
+    border-left: 1px solid rgba(48,52,58,.18);
+  }}
+  .ticker-card:first-child {{ border-left: 0; padding-left: 0; }}
+  .ticker-card:hover {{ background: rgba(48,52,58,.05); }}
+  .tc-name {{ font-size: .9rem; color: #30343A; font-weight: 700; }}
+  .tc-sym {{
+    font-size: .66rem; opacity: .55; margin-left: 6px; font-weight: 400;
+    letter-spacing: .06em;
+  }}
+  .tc-price {{
+    font-size: 1.55rem; font-weight: 700; color: #30343A; margin: 6px 0 8px;
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  }}
+  .tc-row {{ display: flex; justify-content: space-between; align-items: center; }}
+  .tc-mention {{ font-size: .74rem; color: #C83232; font-variant-numeric: tabular-nums; }}
+  /* --- 漲跌：紅墨＝漲（保留台股紅漲），碳墨＝跌 --- */
+  .pill {{
+    display: inline-block; padding: 1px 7px; border: 1px solid;
+    font-size: .74rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  }}
+  .pill.up {{ color: #C83232; border-color: #C83232; }}
+  .pill.down {{ color: #30343A; border-color: rgba(48,52,58,.5); }}
+  .pill.flat {{ color: #30343A; border-color: rgba(48,52,58,.22); opacity: .6; }}
+  /* --- 市場情緒：一條線，左悲觀（碳墨）右樂觀（紅墨） --- */
   .senti-bar {{
-    display: flex; height: 30px; border-radius: 6px; overflow: hidden;
-    background: rgba(132,142,156,.15); margin: 6px 0 10px;
+    display: flex; height: 34px; margin: 8px 0 12px;
+    background: rgba(48,52,58,.1); border: 1px solid rgba(48,52,58,.28);
   }}
   .senti-seg {{
     display: flex; align-items: center; justify-content: center;
     min-width: 0; overflow: hidden; white-space: nowrap;
   }}
   /* 悲觀段用行內 width 指定；樂觀段一律吃掉剩餘寬度（單獨存在時就填滿整條）*/
-  .senti-bull {{ background: #f6465d; flex: 1; }}
-  .senti-bear {{ background: #2ebd85; }}
-  /* 兩段並存時才需要 2px 底色縫隙分隔（總寬才不會超過 100%）*/
+  .senti-bull {{ background: #C83232; flex: 1; }}
+  .senti-bear {{ background: #30343A; }}
+  /* 兩段並存時才需要 2px 紙色縫隙分隔（總寬才不會超過 100%）*/
   .senti-seg + .senti-seg {{ margin-left: 2px; }}
-  /* 線上的直接標示：深色字壓在亮色塊上，確保對比 */
+  /* 線上的直接標示：紙色字壓在墨色塊上 */
   .senti-t {{
-    font-size: .82rem; font-weight: 700; color: #0b0e14;
-    font-variant-numeric: tabular-nums; padding: 0 8px;
+    font-size: .8rem; font-weight: 700; color: #E9E9E5;
+    font-variant-numeric: tabular-nums; padding: 0 10px; letter-spacing: .04em;
   }}
-  .meta b.up {{ color: #f6465d; }}
-  .meta b.down {{ color: #2ebd85; }}
-  /* --- 高頻詞標籤 --- */
+  .meta b.up {{ color: #C83232; }}
+  .meta b.down {{ color: #30343A; }}
+  /* --- 高頻詞：紅墨為重點，碳墨為其他話題 --- */
   .tag {{
-    display: inline-block; background: rgba(46,189,133,.1);
-    border: 1px solid rgba(46,189,133,.25); border-radius: 999px;
-    padding: 2px 12px; margin: 3px; font-size: .85rem; color: #d1d4dc;
+    display: inline-block; border: 1px solid rgba(200,50,50,.45);
+    padding: 1px 10px; margin: 3px 4px 3px 0; font-size: .8rem; color: #30343A;
   }}
-  .tag b {{ color: #2ebd85; }}
-  .tag.dim {{
-    background: rgba(132,142,156,.08); border-color: rgba(132,142,156,.25);
-    color: #848e9c;
-  }}
-  .tag.dim b {{ color: #848e9c; }}
-  /* --- 表格 --- */
+  .tag b {{ color: #C83232; font-variant-numeric: tabular-nums; }}
+  .tag.dim {{ border-color: rgba(48,52,58,.25); opacity: .72; }}
+  .tag.dim b {{ color: #30343A; }}
+  /* --- 表格：只用橫向規則線 --- */
   .tablewrap {{ overflow-x: auto; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: .9rem; }}
-  th, td {{ padding: 9px 12px; text-align: left; white-space: nowrap; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: .85rem; }}
+  th, td {{ padding: 9px 14px 9px 0; text-align: left; white-space: nowrap; }}
   th {{
-    color: #848e9c; font-size: .72rem; text-transform: uppercase;
-    letter-spacing: .08em; border-bottom: 1px solid #2a2e39; font-weight: 600;
+    color: #30343A; font-size: .66rem; text-transform: uppercase;
+    letter-spacing: .12em; border-bottom: 2px solid #30343A; font-weight: 700;
   }}
-  tr {{ border-bottom: 1px solid #21273a; }}
-  tbody tr:hover {{ background: #212838; }}
-  td.num {{ font-variant-numeric: tabular-nums; color: #eaecef; font-weight: 600; }}
+  tr {{ border-bottom: 1px solid rgba(48,52,58,.16); }}
+  tbody tr:hover {{ background: rgba(48,52,58,.05); }}
+  td.num {{ font-variant-numeric: tabular-nums; color: #30343A; font-weight: 700; }}
   td.spark svg {{ display: block; }}
-  td.dim {{ color: #5e6673; font-size: .8rem; }}
-  .tk {{ color: #eaecef; text-decoration: none; font-weight: 600; }}
-  .tk:hover {{ color: #f0b90b; }}
-  .sym {{ display: block; font-size: .7rem; color: #5e6673; font-weight: 400; }}
-  /* --- PTT 熱度長條 --- */
-  .mbar-wrap {{ display: flex; align-items: center; gap: 8px; min-width: 120px; }}
-  .mbar {{
-    height: 6px; border-radius: 3px; min-width: 3px;
-    background: linear-gradient(90deg, #f0b90b, #f6465d);
+  td.dim {{ opacity: .55; font-size: .76rem; font-variant-numeric: tabular-nums; }}
+  .tk {{ color: #30343A; text-decoration: none; font-weight: 700; }}
+  .tk:hover {{ color: #C83232; }}
+  .sym {{
+    display: block; font-size: .66rem; opacity: .55; font-weight: 400;
+    letter-spacing: .06em;
   }}
-  .mnum {{ font-size: .8rem; color: #f0b90b; font-variant-numeric: tabular-nums; }}
-  ul {{ margin: 0; padding-left: 20px; }}
-  a {{ color: #6b9fff; }}
-  img {{ max-width: 100%; border-radius: 8px; display: block; }}
+  /* --- PTT 熱度長條：純紅墨，無漸層 --- */
+  .mbar-wrap {{ display: flex; align-items: center; gap: 8px; min-width: 110px; }}
+  .mbar {{ height: 7px; min-width: 2px; background: #C83232; }}
+  .mnum {{ font-size: .76rem; color: #C83232; font-variant-numeric: tabular-nums; }}
+  ul {{ margin: 0; padding-left: 18px; }}
+  a {{ color: #C83232; }}
+  img {{ max-width: 100%; display: block; }}
 </style>
 </head>
 <body>
   <div class="topbar">
-    <h1>📈 PTT {board.upper()} 熱門標的追蹤</h1>
+    <h1>PTT {board.upper()}<br>熱門標的追蹤</h1>
     <span class="meta">產生時間 {generated_at}｜{len(articles)} 個資料來源</span>
   </div>
 

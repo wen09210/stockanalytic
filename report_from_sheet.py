@@ -5,7 +5,7 @@
 
 資料來源是「PTT股市熱門標的追蹤」試算表（股票代碼、公司名稱、PTT 提及次數、
 高頻詞），近一月走勢與漲跌幅由 yfinance 即時補上，輸出與 ptt_stock_wordcloud.py
-相同的深色交易平台風格 report.html。
+相同的 mono-color 單色印刷風格 report.html。
 
 讀取方式（自動擇一）：
   1. 同目錄有 credentials.json → 用 gspread 直接讀線上試算表
@@ -229,87 +229,96 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PTT Stock 熱門標的追蹤（每日）</title>
 <style>
+  /* mono-color：紙張 Cool Gray #E9E9E5、碳墨 #30343A、紅墨 #C83232。
+     與報告內頁同一套配方，見 .claude/skills/mono-color/ATTRIBUTION.md */
   * { box-sizing: border-box; margin: 0; }
   body {
     height: 100vh; display: flex; flex-direction: column;
-    background: #131722; color: #d1d4dc;
-    font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+    background: #E9E9E5; color: #30343A;
+    font-family: "Helvetica Neue", Helvetica, "PingFang TC",
+                 "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   }
   .tabbar {
-    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-    border-bottom: 1px solid #2a2e39; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+    border-bottom: 2px solid #30343A; flex-wrap: wrap;
   }
   .brand {
-    font-weight: 700; letter-spacing: .1em; color: #eaecef;
-    margin-right: 4px; font-size: .95rem;
+    font-weight: 700; letter-spacing: .18em; color: #30343A;
+    margin-right: 4px; font-size: .78rem; text-transform: uppercase;
   }
   /* --- 日期選擇器 --- */
   .picker { position: relative; }
   .datebtn {
     display: inline-flex; align-items: center; gap: 8px;
-    background: #2ebd85; border: 1px solid #2ebd85; color: #0b0e14;
-    border-radius: 8px; padding: 6px 14px; font-size: .85rem; font-weight: 700;
+    background: #C83232; border: 1px solid #C83232; color: #E9E9E5;
+    padding: 6px 14px; font-size: .82rem; font-weight: 700;
     cursor: pointer; font-variant-numeric: tabular-nums;
-    font-family: inherit;
+    font-family: inherit; letter-spacing: .04em;
   }
-  .datebtn:hover { filter: brightness(1.08); }
-  .datebtn .caret { font-size: .7rem; opacity: .8; }
+  .datebtn:hover { background: #30343A; border-color: #30343A; }
+  .datebtn .caret { font-size: .66rem; opacity: .75; }
   .today-flag {
-    background: rgba(11,14,20,.18); border-radius: 999px;
-    padding: 1px 8px; font-size: .72rem;
+    border: 1px solid rgba(233,233,229,.5);
+    padding: 0 7px; font-size: .68rem; letter-spacing: .08em;
   }
   /* 透明遮罩：iframe 會吃掉點擊事件，沒有它就無法「點報告區關閉日曆」 */
   .scrim { position: fixed; inset: 0; z-index: 40; }
   .scrim[hidden] { display: none; }
   .cal {
     position: absolute; top: calc(100% + 8px); left: 0; z-index: 50;
-    background: #1c2230; border: 1px solid #2a2e39; border-radius: 12px;
-    padding: 12px; width: 268px;
-    box-shadow: 0 12px 32px rgba(0,0,0,.45);
+    background: #E9E9E5; border: 2px solid #30343A;
+    padding: 14px; width: 268px;
   }
   .cal[hidden] { display: none; }
   .cal-head {
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 10px; padding-bottom: 8px;
+    border-bottom: 1px solid rgba(48,52,58,.28);
   }
-  .cal-title { font-size: .9rem; font-weight: 700; color: #eaecef; }
+  .cal-title {
+    font-size: .82rem; font-weight: 700; color: #30343A;
+    font-variant-numeric: tabular-nums; letter-spacing: .04em;
+  }
   .cal-nav {
-    background: #131722; border: 1px solid #2a2e39; color: #d1d4dc;
-    width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+    background: transparent; border: 1px solid rgba(48,52,58,.4); color: #30343A;
+    width: 26px; height: 26px; cursor: pointer;
     font-size: .9rem; line-height: 1; font-family: inherit;
   }
-  .cal-nav:hover:not(:disabled) { border-color: #4a5568; color: #fff; }
-  .cal-nav:disabled { opacity: .3; cursor: default; }
+  .cal-nav:hover:not(:disabled) { background: #30343A; color: #E9E9E5; }
+  .cal-nav:disabled { opacity: .25; cursor: default; }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
   .cal-wd {
-    text-align: center; font-size: .72rem; color: #848e9c;
-    padding: 4px 0 6px;
+    text-align: center; font-size: .66rem; color: #30343A; opacity: .55;
+    padding: 4px 0 6px; letter-spacing: .06em;
   }
   .cal-d {
-    aspect-ratio: 1; border: 0; border-radius: 8px; background: transparent;
-    color: #4a5568; font-size: .82rem; cursor: default;
+    aspect-ratio: 1; border: 0; background: transparent;
+    color: rgba(48,52,58,.3); font-size: .8rem; cursor: default;
     font-variant-numeric: tabular-nums; font-family: inherit;
   }
   /* 有報告的日期才可點 */
   .cal-d.has {
-    color: #d1d4dc; background: #131722; cursor: pointer; font-weight: 600;
+    color: #30343A; border: 1px solid rgba(48,52,58,.28);
+    cursor: pointer; font-weight: 700;
   }
-  .cal-d.has:hover { background: #2a3446; color: #fff; }
-  .cal-d.sel { background: #2ebd85; color: #0b0e14; font-weight: 700; }
+  .cal-d.has:hover { background: #30343A; color: #E9E9E5; }
+  .cal-d.sel { background: #C83232; border-color: #C83232; color: #E9E9E5; }
   .cal-empty { visibility: hidden; }
   .cal-foot {
-    margin-top: 10px; font-size: .72rem; color: #848e9c; text-align: center;
+    margin-top: 10px; padding-top: 8px; font-size: .68rem;
+    border-top: 1px solid rgba(48,52,58,.28);
+    color: #30343A; opacity: .55; text-align: center;
   }
-  iframe { flex: 1; border: 0; width: 100%; background: #131722; }
+  iframe { flex: 1; border: 0; width: 100%; background: #E9E9E5; }
 </style>
 </head>
 <body>
   <div class="scrim" id="scrim" hidden></div>
   <div class="tabbar">
-    <span class="brand">📈 PTT STOCK 每日追蹤</span>
+    <span class="brand">PTT STOCK 每日追蹤</span>
     <div class="picker">
       <button class="datebtn" id="datebtn" aria-haspopup="dialog" aria-expanded="false">
-        <span>📅</span><span id="datelabel"></span><span class="caret">▼</span>
+        <span id="datelabel"></span><span class="caret">▼</span>
       </button>
       <div class="cal" id="cal" role="dialog" aria-label="選擇日期" hidden>
         <div class="cal-head">
