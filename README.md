@@ -18,13 +18,18 @@
 |------|------|
 | `ptt_stock_wordcloud.py` | 爬 PTT 置底文（排除公告）→ 詞彙分類 → 文字雲（僅股票相關詞）→ 產生 `report_live.html` |
 | `ptt_stock_tracker.py` | 每日追蹤版：結果寫入 Google 試算表中「以日期命名的分頁」（同日重跑清空重寫） |
-| `report_from_sheet.py` | 從 Google 試算表讀資料，產生每日報告 `report_日期.html` + 分頁器 `report.html` |
+| `report_from_sheet.py` | 從 Google 試算表讀資料，產生每日報告 `report_日期.html`、公開資訊頁 `mops_日期.html` + 首頁 `report.html` |
+| `mops_tracker.py` | 走 **TWSE OpenAPI** 取當日重大訊息，只保留當天 PTT 熱門標的中的台股 |
 | `sheet_export.csv` | 試算表的本地匯出檔（無 `credentials.json` 時的資料來源） |
-| `report.html` / `index.html` | 分頁器首頁：日期頁籤切換各日報告（index 為 Pages 發佈版） |
+| `report.html` / `index.html` | 首頁：日期選擇器 + 「每日報告／公開資訊」兩個頁籤（index 為 Pages 發佈版） |
 
 報告中的詞彙會分成「股票相關」（公司名、股市詞彙表、含股/盤/漲/跌等字）與「其他話題」兩區，只有股票相關詞會進文字雲。
 
 報告另有「市場情緒」卡片，統計當天推文的樂觀／悲觀比例。採**情緒詞典規則法**（`BULLISH_WORDS`／`BEARISH_WORDS`，可自行增減），逐則判讀語氣並支援否定詞翻轉（「不看好」會算成悲觀）；百分比的分母是「有明確情緒的則數」，不含中性閒聊，避免被稀釋。刻意不用深度學習情緒模型，以免為此在 CI 安裝大型套件與模型。
+
+報告首頁分成兩個頁籤：**每日報告**（文字雲、熱門標的、市場情緒）與**公開資訊**（當日重大訊息）。兩者共用同一個日期選擇器，切頁籤會保留目前日期。
+
+公開資訊頁的資料走 **TWSE OpenAPI**（一次取回整批 JSON 再於本地過濾），不爬 MOPS 網頁——後者是 POST 表單加 session、部分頁面有驗證碼，且對雲端 IP 不友善。抓取失敗時該頁會顯示為無資料，**不影響每日報告的產出**。
 
 ## 安裝
 

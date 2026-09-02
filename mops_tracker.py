@@ -1,145 +1,173 @@
 # -*- coding: utf-8 -*-
 """
-公開資訊觀測站（MOPS）每日重大訊息擷取
+公開資訊觀測站每日重大訊息（走 TWSE OpenAPI）
 ================================================================
 
-只抓「當天 PTT 熱門標的」那幾檔的重大訊息，回答一個很具體的問題：
+只顯示「當天 PTT 熱門標的」的重大訊息，回答一個很具體的問題：
 鄉民今天在吵這檔，是不是因為公司剛好發了什麼公告？
 
-設計上的三個原則
+為什麼用 OpenAPI 而不是爬 MOPS 網頁
 ----------------------------------------------------------------
-1. **絕不拖垮既有流程**：MOPS 對雲端 IP 不友善（本專案爬 PTT 已經踩過同類
-   問題），因此所有對外請求都包在 try/except 裡，任何失敗一律回傳空清單並
-   印出警告。呼叫端（ptt_stock_tracker）不會因此中斷，每日報告照常產出。
-2. **請求量壓到最低**：只查熱門標的、逐檔之間有間隔，不做全市場掃描。
-3. **失敗要看得出來**：印出清楚的診斷訊息（狀態碼、筆數），CI log 才能判斷
-   是被擋、格式改了、還是當天真的沒有公告。
+MOPS 的查詢頁是 POST 表單 + session 狀態，部分頁面有驗證碼，而且對雲端 IP
+不友善（本專案爬 PTT 已經踩過同類問題）。TWSE OpenAPI 回傳 JSON，而且是
+**一次給整批**，所以這裡改成「抓一次、自己過濾」：
 
-注意：MOPS 的端點與回傳格式沒有官方穩定保證，欄位有可能變動。本模組刻意
-把解析寫得寬鬆（缺欄位就跳過該筆），不讓單筆異常影響整批。
+  - 對外請求從「熱門標的數量」次降到 1 次，被視為攻擊流量的風險大幅降低
+  - 不需要逐檔 sleep，整體快很多
+  - 沒有表單、session、驗證碼的問題
+
+防禦性設計
+----------------------------------------------------------------
+1. **絕不拖垮既有流程**：所有對外請求與解析都包在 try/except，任何失敗一律
+   回傳空清單。呼叫端（ptt_stock_tracker）不會中斷，每日報告照常產出。
+2. **欄位用別名比對**：OpenAPI 各資料集的欄位命名不完全一致，直接寫死
+   key 名稱很脆弱。這裡用別名清單找欄位，命名有出入也還能解析。
+3. **失敗要看得出來**：印出實際用到的端點、取得筆數、以及第一筆的欄位名稱，
+   CI log 才足以判斷是端點錯、格式變了、還是當天真的沒有公告。
+
+注意：端點與欄位名稱無法在開發環境驗證（出口 proxy 封鎖 openapi.twse.com.tw），
+以下候選清單是依 TWSE OpenAPI 慣例推定，實際以第一次 CI 執行的 log 為準。
 """
-
-import time
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# MOPS 網站本身查詢重大訊息用的 ajax 端點（一般查詢頁 t05st01 的資料來源）
-MOPS_AJAX_URL = "https://mops.twse.com.tw/mops/web/ajax_t05st01"
+# 依序嘗試的候選資料集（第一個成功且有資料的就採用）。
+# 之所以是清單而不是單一端點：這裡無法連外驗證，先讓它在 CI 上自己找到對的
+# 那個並印出來，比猜錯一次就整個沒資料好。確認後可以收斂成單一端點。
+CANDIDATE_ENDPOINTS = [
+    "https://openapi.twse.com.tw/v1/opendata/t187ap04_L",   # 上市 重大訊息
+    "https://openapi.twse.com.tw/v1/opendata/t187ap04_O",   # 上櫃 重大訊息
+]
+
 REQUEST_TIMEOUT = 20
-SLEEP_BETWEEN = 1.2      # 逐檔查詢之間的間隔，避免被視為攻擊流量
-MAX_PER_STOCK = 5        # 單一標的最多收幾筆，避免版面被單一公司洗版
+
+# 欄位別名：OpenAPI 各資料集命名不完全一致，用別名找比寫死 key 穩
+FIELD_ALIASES = {
+    "code": ("公司代號", "證券代號", "Code", "CompanyCode"),
+    "name": ("公司名稱", "證券名稱", "Name", "CompanyName"),
+    "date": ("發言日期", "出表日期", "Date", "AnnounceDate"),
+    "time": ("發言時間", "Time", "AnnounceTime"),
+    "subject": ("主旨", "標題", "Subject", "Title"),
+}
 
 
 def _make_session() -> requests.Session:
-    """建立帶重試與瀏覽器 UA 的 session（與本專案爬 PTT 的做法一致）。"""
+    """建立帶重試的 session（沿用本專案爬 PTT 的做法）。"""
     session = requests.Session()
     retry = Retry(
         total=2, connect=2, read=2, backoff_factor=2,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=frozenset(["GET", "POST"]),
+        allowed_methods=frozenset(["GET"]),
         raise_on_status=False,
     )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-        ),
-        "Referer": "https://mops.twse.com.tw/mops/web/t05st01",
-    })
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    session.headers.update({"User-Agent": "stockanalytic/1.0 (+github actions)"})
     return session
 
 
-def _roc_year(iso_day: str) -> str:
-    """西元 YYYY-MM-DD 轉民國年（MOPS 查詢用民國年）。"""
-    return str(int(iso_day[:4]) - 1911)
+def _pick(item: dict, key: str) -> str:
+    """依別名清單從一筆資料裡取值，取不到回空字串。"""
+    for alias in FIELD_ALIASES[key]:
+        if alias in item and item[alias] is not None:
+            return str(item[alias]).strip()
+    return ""
 
 
-def _parse_rows(payload: dict, code: str, name: str) -> list[dict]:
-    """把 MOPS 回傳的表格資料整理成統一結構，欄位缺漏就跳過該筆。
+def _digits(s: str) -> str:
+    """只留數字，用來比對日期（民國日期可能寫成 1150902 或 115/09/02）。"""
+    return "".join(ch for ch in s if ch.isdigit())
 
-    MOPS 的 JSON 會把資料放在 data（二維陣列），欄位順序大致為
-    〔公司代號, 公司名稱, 發言日期, 發言時間, 主旨, ...〕。
-    這裡刻意用寬鬆解析：長度不足或格式不符就略過，不讓單筆壞掉整批。
+
+def _fmt_time(raw: str) -> str:
+    """發言時間可能是 083100 / 08:31:00 / 0831，統一成 HH:MM 好讀。
+
+    取不到或格式看不懂就原樣回傳，寧可顯示原始值也不要顯示錯的時間。
     """
-    rows = []
-    data = payload.get("data") or []
+    d = _digits(raw)
+    if len(d) >= 4:
+        return f"{d[:2]}:{d[2:4]}"
+    return raw
+
+
+def _roc_digits(iso_day: str) -> str:
+    """西元 YYYY-MM-DD 轉成民國日期的純數字形式，例如 2026-09-02 → 1150902。"""
+    return f"{int(iso_day[:4]) - 1911}{iso_day[5:7]}{iso_day[8:10]}"
+
+
+def _fetch_dataset(session: requests.Session, url: str) -> list:
+    """抓單一資料集，失敗回空清單並印出原因。"""
+    try:
+        resp = session.get(url, timeout=REQUEST_TIMEOUT)
+    except Exception as e:
+        print(f"  {url} → 連線失敗（{type(e).__name__}: {e}）")
+        return []
+    if resp.status_code != 200:
+        print(f"  {url} → HTTP {resp.status_code}")
+        return []
+    try:
+        data = resp.json()
+    except Exception:
+        print(f"  {url} → 回應不是 JSON（前 120 字：{resp.text[:120]!r}）")
+        return []
     if not isinstance(data, list):
-        return rows
-    for item in data:
-        if not isinstance(item, (list, tuple)) or len(item) < 5:
-            continue
-        subject = str(item[4]).strip()
-        if not subject:
-            continue
-        rows.append({
-            "code": code,
-            "name": name,
-            "date": str(item[2]).strip(),   # 發言日期（民國）
-            "time": str(item[3]).strip(),   # 發言時間
-            "subject": subject,
-        })
-    return rows
+        print(f"  {url} → 預期為陣列，實得 {type(data).__name__}")
+        return []
+    print(f"  {url} → {len(data)} 筆")
+    if data and isinstance(data[0], dict):
+        # 印出實際欄位名，端點或格式有變時能直接從 CI log 看出來
+        print(f"    欄位：{list(data[0].keys())}")
+    return data
 
 
 def fetch_material_news(stocks: list[dict], day: str) -> list[dict]:
     """抓取指定標的在 day 當天的重大訊息。
 
-    stocks 傳入 count_stock_mentions() 的結果（需含 code / name / market）；
-    美股沒有 MOPS 資料，會自動略過。
+    stocks 傳入 count_stock_mentions() 的結果（需含 code / name）；
+    美股沒有這裡的資料，會自動略過。
+
+    做法是「整批抓一次、在本地過濾」——OpenAPI 一次回傳全市場，
+    不需要逐檔查詢。
 
     回傳 [{code, name, date, time, subject}, ...]；
     任何一步失敗都只會讓結果變少或變空，不會丟出例外。
     """
-    # 只有台股（4 位數字代碼）在 MOPS 有資料，美股略過
-    targets = [s for s in stocks if str(s.get("code", "")).isdigit()]
-    if not targets:
+    wanted = {str(s.get("code", "")): s.get("name", "")
+              for s in stocks if str(s.get("code", "")).isdigit()}
+    if not wanted:
         print("[資訊] 熱門標的中沒有台股，略過重大訊息查詢")
         return []
 
     session = _make_session()
-    roc_y, month = _roc_year(day), day[5:7]
-    results, ok, failed = [], 0, 0
+    target = _roc_digits(day)
+    results = []
 
-    for s in targets:
-        code, name = s["code"], s["name"]
-        try:
-            resp = session.post(
-                MOPS_AJAX_URL,
-                data={
-                    "encodeURIComponent": "1",
-                    "step": "1",
-                    "firstin": "1",
-                    "off": "1",
-                    "TYPEK": "all",
-                    "co_id": code,
-                    "year": roc_y,
-                    "month": month,
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
-            if resp.status_code != 200:
-                failed += 1
-                print(f"  {name}({code})：HTTP {resp.status_code}")
+    print(f"[資訊] 查詢重大訊息（目標日期民國 {target}，"
+          f"比對 {len(wanted)} 檔熱門標的）")
+    for url in CANDIDATE_ENDPOINTS:
+        for item in _fetch_dataset(session, url):
+            if not isinstance(item, dict):
                 continue
-            rows = _parse_rows(resp.json(), code, name)
-            # 只留當天（MOPS 用民國日期，格式如 115/09/02）
-            today_roc = f"{roc_y}/{month}/{day[8:10]}"
-            rows = [r for r in rows if r["date"].replace("-", "/") == today_roc]
-            results.extend(rows[:MAX_PER_STOCK])
-            ok += 1
-        except Exception as e:      # 網路、JSON、格式問題一律吞掉，不影響主流程
-            failed += 1
-            print(f"  {name}({code})：查詢失敗（{type(e).__name__}: {e}）")
-        time.sleep(SLEEP_BETWEEN)
+            code = _pick(item, "code")
+            if code not in wanted:
+                continue
+            # 日期比對用純數字，避免 1150902 / 115/09/02 兩種寫法對不上
+            if _digits(_pick(item, "date")) != target:
+                continue
+            subject = _pick(item, "subject")
+            if not subject:
+                continue
+            results.append({
+                "code": code,
+                "name": _pick(item, "name") or wanted[code],
+                "date": _pick(item, "date"),
+                "time": _fmt_time(_pick(item, "time")),
+                "subject": subject,
+            })
 
-    print(f"[資訊] 重大訊息：查詢 {len(targets)} 檔"
-          f"（成功 {ok}、失敗 {failed}），共取得 {len(results)} 則")
-    if failed and not results:
-        print("[警告] 重大訊息全數查詢失敗，可能是 MOPS 擋住了執行環境的出口 IP；"
-              "本次報告的公開資訊頁會顯示為無資料，不影響每日報告。")
+    print(f"[資訊] 重大訊息：命中 {len(results)} 則")
+    if not results:
+        print("[提示] 沒有命中不一定是錯誤——多數個股在多數日子本來就沒有公告。"
+              "若連續多日皆為空，再依上面印出的筆數與欄位名檢查端點是否正確。")
     return results
