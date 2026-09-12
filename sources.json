@@ -635,5 +635,19 @@
       "bullish_pct": 21.4,
       "bearish_pct": 78.6
     }
+  },
+  "2026-09-12": {
+    "title": "[閒聊] 2026/09/11 盤後閒聊",
+    "url": "https://www.ptt.cc/bbs/Stock/M.1789106448.A.171.html",
+    "pushes": 1489,
+    "sentiment": {
+      "bullish": 65,
+      "bearish": 97,
+      "neutral": 1328,
+      "total": 1490,
+      "scored": 162,
+      "bullish_pct": 40.1,
+      "bearish_pct": 59.9
+    }
   }
 }
