@@ -53,6 +53,26 @@ def load_sources() -> dict:
 # ---------------------------------------------------------------------------
 # 讀取試算表資料（線上 gspread 或本地 CSV）
 # ---------------------------------------------------------------------------
+# 一次 batchGet 最多帶幾個 range。批次讀取是走 GET、range 放在查詢字串裡，
+# 分頁數成長到數百個時網址會過長，所以還是分批；以目前 61 個分頁來說就是 1 次。
+RANGES_PER_REQUEST = 100
+
+
+def _a1_sheet(title: str) -> str:
+    """把分頁名稱轉成 A1 notation 的整頁 range。
+
+    分頁名是「2026-09-12」這種帶連字號的字串，在 A1 notation 裡必須用單引號
+    括起來，否則會被當成運算式而解析失敗；名稱本身若含單引號要改成兩個。
+    """
+    return "'" + title.replace("'", "''") + "'"
+
+
+def _chunks(seq: list, size: int):
+    """把序列切成每段最多 size 個。"""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
 def load_rows() -> list[list[str]]:
     """讀取試算表全部儲存格，回傳列的清單（每列是字串清單）。"""
     if os.path.exists(CREDENTIALS_FILE):
@@ -67,12 +87,22 @@ def load_rows() -> list[list[str]]:
         client = gspread.authorize(creds)
         spreadsheet = client.open(SPREADSHEET_NAME)
         # 合併所有分頁的內容：新版是「每天一個日期分頁」，
-        # 舊版（單一分頁、日期在欄位裡）也相容——反正每列都帶檢查日期
+        # 舊版（單一分頁、日期在欄位裡）也相容——反正每列都帶檢查日期。
+        #
+        # 這裡用 values_batch_get 一次帶多個 range，而不是逐一 ws.get_all_values()。
+        # 後者每個分頁算一次 API 讀取，分頁累積到 61 天時會在幾秒內連發 61 次請求，
+        # 超過 Sheets API「每分鐘 60 次讀取」的配額而收到 429（2026-09-13 起
+        # 排程連續失敗就是這個原因，且每多一天就更嚴重）。
+        worksheets = spreadsheet.worksheets()      # 只呼叫一次，避免多一次請求
         rows = []
-        for ws in spreadsheet.worksheets():
-            rows.extend(ws.get_all_values())
+        for chunk in _chunks(worksheets, RANGES_PER_REQUEST):
+            resp = spreadsheet.values_batch_get([_a1_sheet(ws.title) for ws in chunk])
+            for vr in resp.get("valueRanges", []):
+                # 空白分頁不會有 values 這個鍵
+                rows.extend(vr.get("values", []))
+        n_req = -(-len(worksheets) // RANGES_PER_REQUEST)  # 無條件進位
         print(f"[資訊] 從線上試算表「{SPREADSHEET_NAME}」讀取 "
-              f"{len(spreadsheet.worksheets())} 個分頁")
+              f"{len(worksheets)} 個分頁（{n_req} 次 API 請求）")
         return rows
 
     if not os.path.exists(CSV_FALLBACK):
