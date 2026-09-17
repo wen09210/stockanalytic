@@ -620,20 +620,26 @@ def fetch_close_price(code: str, check_date: date):
 
 
 def write_to_google_sheets(stock_rows: list[list], word_rows: list[list],
-                           day: str) -> None:
+                           day: str, news_rows: list[list] = None) -> None:
     """把當天的資料寫入「同一份試算表」中以日期命名的分頁（例如 2026-07-13）。
 
-    分頁版面：上半部為熱門標的表格、隔兩列後是高頻詞表格。
+    分頁版面：熱門標的表格 → 高頻詞表格 → 重大訊息表格，各隔兩列。
     - 永遠寫同一份試算表（SPREADSHEET_NAME），不會建立新檔案
     - 該日期分頁已存在時會先清空再重寫（同一天重跑不會累積重複資料）
     若找不到憑證檔則改用「乾跑模式」，只印出資料不實際寫入。
     """
-    # 組出該分頁的完整儲存格內容（兩個區塊）
+    # 組出該分頁的完整儲存格內容（三個區塊）
     values = [["檢查日期", "股票代碼", "公司名稱", "PTT提及次數", "股價"]]
     values += stock_rows
     values += [[], []]
     values += [["檢查日期", "排名", "詞彙", "出現次數"]]
     values += word_rows
+    if news_rows:
+        values += [[], []]
+        # 表頭第二欄刻意不叫「股票代碼」：report_from_sheet 的 parse_sheet
+        # 是靠表頭字串切換解析模式，重複用同一個詞會讓兩個區塊混在一起
+        values += [["檢查日期", "重大訊息", "公司名稱", "發言時間", "主旨"]]
+        values += news_rows
 
     if not os.path.exists(CREDENTIALS_FILE):
         print(f"\n[乾跑模式] 找不到 {CREDENTIALS_FILE}，"
@@ -803,7 +809,22 @@ def main():
         for rank, (word, freq) in enumerate(word_freq.most_common(), start=1)
         if freq >= MIN_WORD_FREQ_TO_SHEET
     ]
-    write_to_google_sheets(stock_rows, word_rows, day=today.isoformat())
+    # --- 步驟 6：公開資訊觀測站的當日重大訊息（只查熱門標的）---
+    # 整段包在 try 裡：MOPS 對雲端 IP 不友善，就算完全抓不到也只是這一區沒
+    # 資料，絕不能讓既有的每日報告跟著失敗
+    news_rows = []
+    try:
+        from mops_tracker import fetch_material_news
+        print("[資訊] 查詢公開資訊觀測站當日重大訊息...")
+        for n in fetch_material_news(hot_stocks, today.isoformat()):
+            news_rows.append([today.isoformat(), f"'{n['code']}", n["name"],
+                              n["time"], n["subject"]])
+    except Exception as e:
+        print(f"[警告] 重大訊息查詢整段失敗（{type(e).__name__}: {e}），"
+              "略過此區塊，不影響每日報告")
+
+    write_to_google_sheets(stock_rows, word_rows, day=today.isoformat(),
+                           news_rows=news_rows)
 
 
 if __name__ == "__main__":

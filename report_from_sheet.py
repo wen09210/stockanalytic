@@ -53,6 +53,26 @@ def load_sources() -> dict:
 # ---------------------------------------------------------------------------
 # 讀取試算表資料（線上 gspread 或本地 CSV）
 # ---------------------------------------------------------------------------
+# 一次 batchGet 最多帶幾個 range。批次讀取是走 GET、range 放在查詢字串裡，
+# 分頁數成長到數百個時網址會過長，所以還是分批；以目前 61 個分頁來說就是 1 次。
+RANGES_PER_REQUEST = 100
+
+
+def _a1_sheet(title: str) -> str:
+    """把分頁名稱轉成 A1 notation 的整頁 range。
+
+    分頁名是「2026-09-12」這種帶連字號的字串，在 A1 notation 裡必須用單引號
+    括起來，否則會被當成運算式而解析失敗；名稱本身若含單引號要改成兩個。
+    """
+    return "'" + title.replace("'", "''") + "'"
+
+
+def _chunks(seq: list, size: int):
+    """把序列切成每段最多 size 個。"""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
 def load_rows() -> list[list[str]]:
     """讀取試算表全部儲存格，回傳列的清單（每列是字串清單）。"""
     if os.path.exists(CREDENTIALS_FILE):
@@ -67,12 +87,22 @@ def load_rows() -> list[list[str]]:
         client = gspread.authorize(creds)
         spreadsheet = client.open(SPREADSHEET_NAME)
         # 合併所有分頁的內容：新版是「每天一個日期分頁」，
-        # 舊版（單一分頁、日期在欄位裡）也相容——反正每列都帶檢查日期
+        # 舊版（單一分頁、日期在欄位裡）也相容——反正每列都帶檢查日期。
+        #
+        # 這裡用 values_batch_get 一次帶多個 range，而不是逐一 ws.get_all_values()。
+        # 後者每個分頁算一次 API 讀取，分頁累積到 61 天時會在幾秒內連發 61 次請求，
+        # 超過 Sheets API「每分鐘 60 次讀取」的配額而收到 429（2026-09-13 起
+        # 排程連續失敗就是這個原因，且每多一天就更嚴重）。
+        worksheets = spreadsheet.worksheets()      # 只呼叫一次，避免多一次請求
         rows = []
-        for ws in spreadsheet.worksheets():
-            rows.extend(ws.get_all_values())
+        for chunk in _chunks(worksheets, RANGES_PER_REQUEST):
+            resp = spreadsheet.values_batch_get([_a1_sheet(ws.title) for ws in chunk])
+            for vr in resp.get("valueRanges", []):
+                # 空白分頁不會有 values 這個鍵
+                rows.extend(vr.get("values", []))
+        n_req = -(-len(worksheets) // RANGES_PER_REQUEST)  # 無條件進位
         print(f"[資訊] 從線上試算表「{SPREADSHEET_NAME}」讀取 "
-              f"{len(spreadsheet.worksheets())} 個分頁")
+              f"{len(worksheets)} 個分頁（{n_req} 次 API 請求）")
         return rows
 
     if not os.path.exists(CSV_FALLBACK):
@@ -87,14 +117,19 @@ def load_rows() -> list[list[str]]:
 
 
 def parse_sheet(rows: list[list[str]], target_date) -> tuple:
-    """把試算表列解析成 (日期, 股票清單, 詞頻 Counter)。
+    """把試算表列解析成 (日期, 股票清單, 詞頻 Counter, 重大訊息清單)。
 
-    表內有兩個區塊：股票追蹤（表頭含「股票代碼」）與熱門詞彙（表頭含「詞彙」），
-    以表頭列切換解析模式；資料會累積多天，依「檢查日期」欄過濾出目標日期。
+    表內有三個區塊：股票追蹤（表頭含「股票代碼」）、熱門詞彙（含「詞彙」）與
+    公開資訊觀測站重大訊息（含「重大訊息」），以表頭列切換解析模式；
+    資料會累積多天，依「檢查日期」欄過濾出目標日期。
+
+    重大訊息是後來才加的區塊，舊分頁沒有它——這種情況會回傳空清單，
+    對應的頁面會顯示為無資料，不會出錯。
     """
     stocks_by_date: dict[str, list[dict]] = {}
     words_by_date: dict[str, Counter] = {}
-    mode = None  # "stock" 或 "word"
+    news_by_date: dict[str, list[dict]] = {}
+    mode = None  # "stock"、"word" 或 "news"
 
     for row in rows:
         cells = [c.strip() for c in row]
@@ -106,6 +141,9 @@ def parse_sheet(rows: list[list[str]], target_date) -> tuple:
             continue
         if "詞彙" in cells:
             mode = "word"
+            continue
+        if "重大訊息" in cells:
+            mode = "news"
             continue
         if mode == "stock" and len(cells) >= 4:
             d, code, name, mentions = cells[0], cells[1], cells[2], cells[3]
@@ -123,6 +161,12 @@ def parse_sheet(rows: list[list[str]], target_date) -> tuple:
                 words_by_date.setdefault(d, Counter())[word] = (
                     int(freq) if freq.isdigit() else 0
                 )
+        elif mode == "news" and len(cells) >= 5:
+            d, code, name, tm, subject = cells[:5]
+            if subject:
+                news_by_date.setdefault(d, []).append({
+                    "code": code, "name": name, "time": tm, "subject": subject,
+                })
 
     if not stocks_by_date:
         sys.exit("[錯誤] 試算表中找不到股票資料")
@@ -132,7 +176,8 @@ def parse_sheet(rows: list[list[str]], target_date) -> tuple:
     if day not in stocks_by_date:
         sys.exit(f"[錯誤] 試算表中沒有 {day} 的資料，"
                  f"可用日期：{', '.join(sorted(stocks_by_date))}")
-    return day, stocks_by_date[day], words_by_date.get(day, Counter())
+    return (day, stocks_by_date[day], words_by_date.get(day, Counter()),
+            news_by_date.get(day, []))
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +291,19 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
     font-weight: 700; letter-spacing: .18em; color: #4A1F1F;
     margin-right: 4px; font-size: .78rem; text-transform: uppercase;
   }
+  /* --- 檢視頁籤（每日報告／公開資訊）--- */
+  .views { display: flex; gap: 0; margin-left: auto; }
+  .viewtab {
+    background: transparent; border: 1px solid rgba(74,31,31,.35);
+    border-left-width: 0; color: #4A1F1F; font-family: inherit;
+    padding: 6px 14px; font-size: .78rem; cursor: pointer;
+    letter-spacing: .04em;
+  }
+  .viewtab:first-child { border-left-width: 1px; }
+  .viewtab:hover { background: rgba(74,31,31,.07); }
+  .viewtab[aria-selected="true"] {
+    background: #4A1F1F; border-color: #4A1F1F; color: #F5F1E8; font-weight: 700;
+  }
   /* --- 日期選擇器 --- */
   .picker { position: relative; }
   .datebtn {
@@ -330,6 +388,12 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
         <div class="cal-foot">只有產出報告的日期可以選取</div>
       </div>
     </div>
+    <div class="views" role="tablist">
+      <button class="viewtab" id="tab-report" role="tab"
+              aria-selected="true" data-prefix="report_">每日報告</button>
+      <button class="viewtab" id="tab-mops" role="tab"
+              aria-selected="false" data-prefix="mops_">公開資訊</button>
+    </div>
   </div>
   <iframe id="frame" src="report___LATEST__.html" title="每日報告"></iframe>
 <script>
@@ -363,6 +427,25 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
 
   var view = parse(selected);
   var viewY = view.y, viewM = view.m;
+
+  // 目前檢視的頁面（report_ = 每日報告、mops_ = 公開資訊），與日期共用狀態
+  var prefix = "report_";
+  var tabs = [document.getElementById("tab-report"),
+              document.getElementById("tab-mops")];
+
+  function loadFrame() {
+    frame.src = prefix + selected + ".html";
+  }
+
+  tabs.forEach(function (t) {
+    t.addEventListener("click", function () {
+      prefix = t.dataset.prefix;
+      tabs.forEach(function (x) {
+        x.setAttribute("aria-selected", x === t ? "true" : "false");
+      });
+      loadFrame();          // 切頁時保留目前選中的日期，不跳回今天
+    });
+  });
 
   function setLabel() {
     label.textContent = selected;
@@ -434,7 +517,7 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
     var day = e.target.dataset && e.target.dataset.day;
     if (!day) return;
     selected = day;
-    frame.src = "report_" + day + ".html";
+    loadFrame();            // 換日期時保留目前頁籤，不會被切回每日報告
     setLabel();
     openCal(false);
   });
@@ -469,7 +552,7 @@ def main():
     print(f"[資訊] 試算表內共有 {len(all_days)} 天資料：{', '.join(all_days)}")
 
     for day in all_days:
-        _, stocks, word_freq = parse_sheet(rows, day)
+        _, stocks, word_freq, news = parse_sheet(rows, day)
 
         # 詞彙分類：股票相關進文字雲，不相關另列一區
         stock_names = [s["name"] for s in stocks]
@@ -504,6 +587,12 @@ def main():
             # 情緒由爬蟲端算好存在 sources.json；舊資料沒這欄就傳 None 不顯示卡片
             sentiment=(src or {}).get("sentiment"),
         )
+
+        # 公開資訊觀測站頁：舊分頁沒有這個區塊時 news 會是空的，
+        # 頁面照樣產出並顯示為無資料，這樣日曆每一天都有對應檔案可切
+        wc.generate_mops_report(news, day,
+                                os.path.join(BASE_DIR, f"mops_{day}.html"),
+                                sheet_url=SHEET_URL)
 
     # 分頁器首頁（預設顯示最新一天）
     write_tabbed_index(all_days, REPORT_OUTPUT)
