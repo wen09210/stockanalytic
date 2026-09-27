@@ -34,6 +34,13 @@ jobs:
         run: echo "${{ secrets.GCP_CREDENTIALS_B64 }}" | base64 -d > credentials.json
 
       - name: 爬 PTT 並寫入 Google 試算表
+        # PTT 會擋雲端主機的出口 IP（GitHub runner 常中），這是外部因素、
+        # 我們無法從程式端解決。但爬蟲失敗不該連帶讓報告產生也停擺：
+        # 2026-09-13～15 的資料其實已寫進試算表，卻因為之後每天都卡在這一步
+        # 而始終沒被轉成報告。改成不中斷，讓下一步照樣用試算表既有資料重建。
+        # 注意：這一步失敗時 job 仍算成功，Actions 頁面會把該步驟標成警告；
+        # 要確認當天有沒有抓到新資料，看這一步的狀態而不是整個 job 的狀態。
+        continue-on-error: true
         run: python ptt_stock_tracker.py
 
       - name: 從試算表重建分頁器報告
