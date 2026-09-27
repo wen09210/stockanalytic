@@ -1,6 +1,6 @@
 # PTT 股市熱門標的追蹤（stockanalytic）
 
-自動爬取 PTT Stock 板置底文章，分析鄉民討論熱度：jieba 斷詞產生文字雲、辨識被提及的台灣上市櫃股票與熱門美股並查詢股價，結果可輸出成單色印刷編輯風格（mono-color）的網頁報告，或記錄到 Google 試算表觀察每日變化。
+自動抓取 PTT Stock 板每天的盤後閒聊（排程經由鏡像站 disp.cc 取得，見下方說明），分析鄉民討論熱度：jieba 斷詞產生文字雲、辨識被提及的台灣上市櫃股票與熱門美股並查詢股價，結果可輸出成單色印刷編輯風格（mono-color）的網頁報告，或記錄到 Google 試算表觀察每日變化。
 
 美股採「精選熱門清單」（`ptt_stock_tracker.py` 的 `US_STOCKS`，可自行增減），以中文暱稱為主、英文代碼為輔比對——刻意不抓全美股清單，因為 `ON`／`IT`／`ALL`／`NOW` 這類短代碼會與推文的英文縮寫大量誤撞。注意排程在台灣時間 00:00 執行時美股仍在盤中，故美股取到的是「前一交易日」收盤價（報告會據實標示該價格的交易日）。
 
@@ -19,6 +19,7 @@
 | `ptt_stock_wordcloud.py` | 爬 PTT 置底文（排除公告）→ 詞彙分類 → 文字雲（僅股票相關詞）→ 產生 `report_live.html` |
 | `ptt_stock_tracker.py` | 每日追蹤版：結果寫入 Google 試算表中「以日期命名的分頁」（同日重跑清空重寫） |
 | `report_from_sheet.py` | 從 Google 試算表讀資料，產生每日報告 `report_日期.html`、公開資訊頁 `mops_日期.html` + 首頁 `report.html` |
+| `disp_source.py` | 從鏡像站 **disp.cc** 取得當天的「[閒聊] 日期 盤後閒聊」與推文（排程使用；PTT 封鎖了 CI 的 IP） |
 | `mops_tracker.py` | 走 **TWSE OpenAPI** 取當日重大訊息，只保留當天 PTT 熱門標的中的台股 |
 | `sheet_export.csv` | 試算表的本地匯出檔（無 `credentials.json` 時的資料來源） |
 | `report.html` / `index.html` | 首頁：日期選擇器 + 「每日報告／公開資訊」兩個頁籤（index 為 Pages 發佈版） |
@@ -30,6 +31,12 @@
 報告首頁分成兩個頁籤：**每日報告**（文字雲、熱門標的、市場情緒）與**公開資訊**（當日重大訊息）。兩者共用同一個日期選擇器，切頁籤會保留目前日期。
 
 公開資訊頁的資料走 **TWSE OpenAPI**（一次取回整批 JSON 再於本地過濾），不爬 MOPS 網頁——後者是 POST 表單加 session、部分頁面有驗證碼，且對雲端 IP 不友善。抓取失敗時該頁會顯示為無資料，**不影響每日報告的產出**。
+
+## 資料來源：為什麼走 disp.cc
+
+2026-09-16 起 PTT 對 GitHub Actions runner 的出口 IP 一律回 403（IP 層封鎖，連續多日、重試無效），排程因此改從 PTT 鏡像站 [disp.cc](https://disp.cc/b/Stock) 抓**同一篇**「[閒聊] YYYY/MM/DD 盤後閒聊」——選文邏輯與以前抓置底文相同（取日期最新的一篇，週末沿用週五），所以前後資料可以直接比較。報告的資料來源連結也會指向 disp.cc 上的該篇文章。
+
+`disp_source.py` 刻意不依賴 disp.cc 的 class 名稱：文章靠網址樣式與標題辨識，推文靠 PTT 推文本身的格式（`推/噓/→ 帳號: 內容 日期`）辨識，並在 log 印出每一步抓到的數量，結構有變時可從 CI log 直接判斷。`ptt_stock_wordcloud.py` 的本機即時報告仍直連 PTT（本機 IP 通常不受影響）。
 
 ## 安裝
 

@@ -4,8 +4,9 @@ PTT 股市熱門標的自動追蹤系統
 ================================================================
 
 功能流程：
-  1. 爬取 PTT 指定看板（預設 Stock 板）的置底文章（自動略過 [公告]），
-     擷取內文與所有推文（處理 over18=1 cookie）
+  1. 從 PTT 鏡像站 disp.cc 抓 Stock 板當天的「[閒聊] 日期 盤後閒聊」，
+     擷取內文與所有推文（PTT 自 2026-09-16 起封鎖 CI runner 的 IP，
+     見 disp_source.py）
   2. jieba 中文斷詞 + 停用詞過濾 + 詞頻統計，
      生成當天文字雲圖片 wordcloud_today.png
   3. 比對全台上市櫃公司清單（證交所 ISIN 網頁），
@@ -712,42 +713,56 @@ def _record_source(day: str, article: dict, push_count: int,
 
 
 def _scrape_pinned(today_str: str) -> tuple:
-    """跑一次完整的置底文章爬取，回傳 (pinned, all_texts, push_total)。"""
-    session = make_ptt_session()
-    print(f"[資訊] 爬取 PTT {BOARD} 板置底文章（{today_str}）...")
-    pinned = get_pinned_articles(session, BOARD)
-    if not pinned:
-        sys.exit("[結束] 沒有可分析的置底文章")
+    """跑一次完整的盤後閒聊爬取，回傳 (pinned, all_texts, push_total)。
 
+    2026-09-16 起 PTT 對 GitHub Actions runner 的 IP 一律回 403，改從鏡像站
+    disp.cc 抓同一篇「[閒聊] 日期 盤後閒聊」（細節見 disp_source.py）。
+    原本的 get_pinned_articles / get_article_content 保留給 PTT 連得到的環境
+    （例如本機）參考使用。
+    """
+    import disp_source
+    session = disp_source.make_session()
+    print(f"[資訊] 從 disp.cc 抓取 PTT {BOARD} 板盤後閒聊（{today_str}）...")
+    try:
+        art = disp_source.find_latest_after_market_chat(session)
+    except LookupError as e:
+        sys.exit(f"[結束] {e}")
+    if (date.fromisoformat(today_str) - art["date"]).days > 4:
+        # 週末、連假沿用最後一個交易日的文章是正常的（PTT 置底時期也一樣），
+        # 但隔太久通常代表列表沒更新或選錯文章
+        print(f"[警告] 找到的盤後閒聊日期 {art['date']} 距今超過 4 天")
+
+    pinned = [{"title": art["title"], "url": art["url"]}]
     all_texts, push_total = [], 0
-    for art in pinned:
-        print(f"  抓取：{art['title']}")
-        data = get_article_content(session, art["url"])
+    for a in pinned:
+        print(f"  抓取：{a['title']}")
+        data = disp_source.get_article_content(session, a["url"])
         all_texts.append(data["content"])
         all_texts.extend(data["pushes"])
         push_total += len(data["pushes"])
-    print(f"[資訊] 共分析 {len(pinned)} 篇置底文章")
+    if push_total == 0:
+        sys.exit("[結束] 文章中解析不到任何推文，請檢查上方 log 的頁面結構資訊")
+    print(f"[資訊] 共分析 {len(pinned)} 篇文章、{push_total} 則推文")
     return pinned, all_texts, push_total
 
 
 def main():
     today = date.today()
 
-    # --- 步驟 1：爬置底文章（外層重試：某些雲端主機的出口 IP 可能被 PTT
-    # 的防爬蟲規則在 TLS 層直接斷線，_mount_retry_adapter 處理的是單次連線的
-    # 立即重試；這裡再包一層「整個流程重來」、間隔拉長到 30 秒，讓重試橫跨
-    # 較長時間、更有機會避開節流窗口） ---
+    # --- 步驟 1：抓當天的盤後閒聊（外層重試：session 本身的 adapter 處理的是
+    # 單次連線的立即重試；這裡再包一層「整個流程重來」、間隔拉長到 30 秒，讓
+    # 重試橫跨較長時間、更有機會避開暫時性的節流） ---
     ATTEMPTS = 3
     for attempt in range(1, ATTEMPTS + 1):
         try:
             pinned, all_texts, push_total = _scrape_pinned(today.isoformat())
             break
         except requests.exceptions.RequestException as e:
-            print(f"[警告] 第 {attempt}/{ATTEMPTS} 次嘗試連線 PTT 失敗：{e}")
+            print(f"[警告] 第 {attempt}/{ATTEMPTS} 次嘗試連線 disp.cc 失敗：{e}")
             if attempt == ATTEMPTS:
                 sys.exit(
-                    "[錯誤] 連續多次無法連線 PTT，可能是目前執行環境的出口 IP "
-                    "被 PTT 的防爬蟲規則封鎖（常見於雲端主機／CI runner）。"
+                    "[錯誤] 連續多次無法連線 disp.cc，可能是目前執行環境的出口 IP "
+                    "被封鎖（常見於雲端主機／CI runner）。"
                 )
             time.sleep(30)
 
