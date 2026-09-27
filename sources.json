@@ -649,5 +649,19 @@
       "bullish_pct": 40.1,
       "bearish_pct": 59.9
     }
+  },
+  "2026-09-27": {
+    "title": "■ [閒聊] 2026/09/25 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ifOc",
+    "pushes": 1314,
+    "sentiment": {
+      "bullish": 62,
+      "bearish": 148,
+      "neutral": 1105,
+      "total": 1315,
+      "scored": 210,
+      "bullish_pct": 29.5,
+      "bearish_pct": 70.5
+    }
   }
 }
