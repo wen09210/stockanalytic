@@ -55,6 +55,14 @@ jobs:
           print("=== 前 3 則推文元素的 HTML ===")
           for n in nodes[:3]:
               print(str(n)[:300])
+          print("=== 最後 1 則推文元素的 HTML ===")
+          if nodes:
+              print(str(nodes[-1])[:300])
+          print("=== 可能是「載入更多推文」的連結 ===")
+          for a in page.find_all("a"):
+              t = a.get_text(strip=True)
+              if any(k in t for k in ("更多", "載入", "全部", "推文")):
+                  print(" ", repr(t)[:60], a.get("href"), a.get("onclick"))
           print("=== 前 5 則推文內容 ===")
           for p in out["pushes"][:5]:
               print(" ", p)
