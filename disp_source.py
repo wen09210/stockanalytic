@@ -29,7 +29,11 @@
 3. **失敗要看得出來**：每一步都印出抓到幾個連結、幾則推文、內文取自哪個元素，
    CI log 足以判斷是被擋、結構不符還是推文被截斷。
 
-實際結構以第一次 CI 執行的 log 為準；若解析不到，把 log 貼給維護者即可調整。
+2026-09-27 已由 CI（disp-smoke-test.yml）對真實頁面驗證：runner 可連線，
+列表頁往前翻兩頁找到 09/25 盤後閒聊，推文為
+  <div class="push_row">…<span class="ptt-push-content">: 內容</span>
+  <span class="push-right">1F 09/25 08:32</span></div>
+頁面上 1314 個 push_row 全數解析；涵蓋率說明見 get_article_content 內註解。
 """
 
 import re
@@ -308,19 +312,24 @@ def get_article_content(session: requests.Session, url: str) -> dict:
             except requests.exceptions.RequestException as e:
                 print(f"    AMP 版抓取失敗（{e}），沿用一般版")
 
-    # 樓層號是 disp.cc 標的連續編號：最高樓層明顯大於抓到的則數，代表有推文
-    # 沒出現在頁面上（例如分批載入）；兩者相近就是完整的
+    # 樓層號沿用 PTT 的推文順序編號，但 disp.cc 頁面本來就不會列出每一樓：
+    # 2026-09-25 那篇最高 1493F，頁面上只有 1314 個 push_row（全數解析成功），
+    # 缺的樓層零散分布（131 段、多半一次缺一樓），不在 HTML 裡、也沒有「載入
+    # 更多」。原因無法從這端確認，實測涵蓋率約 88%。這裡記錄涵蓋率，明顯低於
+    # 平常時才警告（可能是改版或分批載入）
     floors = [int(m.group(1)) for n in nodes
               if (m := _FLOOR_RE.search(n.get_text(" ", strip=True)))]
-    floor_note = f"，最高樓層 {max(floors)}F" if floors else ""
+    coverage = len(nodes) / max(floors) if floors else None
+    floor_note = (f"，最高樓層 {max(floors)}F，涵蓋率 {coverage:.0%}"
+                  if floors else "")
 
     for node in nodes:
         node.extract()
     content, where = _extract_content(soup)
     print(f"    推文 {len(pushes)} 則{floor_note}；內文 {len(content)} 字，取自 {where}")
-    if floors and max(floors) > len(nodes) * 1.05:
-        print(f"    [提示] 最高樓層 {max(floors)}F 比抓到的 {len(nodes)} 則多，"
-              "頁面上可能沒有列出全部推文")
+    if coverage is not None and coverage < 0.75:
+        print(f"    [警告] 推文涵蓋率 {coverage:.0%} 明顯低於平常的約 88%，"
+              "頁面可能改版或改成分批載入")
     if len(pushes) < _SUSPICIOUSLY_FEW_PUSHES:
         print(f"    [提示] 盤後閒聊通常約 1,500 則推文，只抓到 {len(pushes)} 則，"
               "可能被截斷或推文格式與預期不同")
