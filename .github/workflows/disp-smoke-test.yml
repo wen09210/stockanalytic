@@ -58,8 +58,31 @@ jobs:
           print("=== 最後 1 則推文元素的 HTML ===")
           if nodes:
               print(str(nodes[-1])[:300])
+          # 樓層缺口診斷：頁面上有幾個 push_row、哪些沒被推文規則比對到
+          rows = page.select("div.push_row")
+          matched = {id(n) for n in nodes}
+          missed = [r for r in rows if id(r) not in matched
+                    and not any(id(x) in matched for x in r.find_all(True))]
+          got = sorted(int(m.group(1)) for n in nodes
+                       if (m := d._FLOOR_RE.search(n.get_text(" ", strip=True))))
+          gaps = [(a, b) for a, b in zip(got, got[1:]) if b - a > 1]
+          print(f"=== push_row 共 {len(rows)} 個，未比對到 {len(missed)} 個；"
+                f"樓層缺口 {len(gaps)} 段，前 5 段：{gaps[:5]} ===")
+          for r in missed[:4]:
+              print(str(r)[:500])
+          if gaps:
+              a, b = gaps[0]
+              for n in nodes:
+                  t = n.get_text(" ", strip=True)
+                  if f" {a}F " in f" {t} ":
+                      nxt = n.find_next_sibling()
+                      print("--- 缺口前一則之後的兄弟元素：")
+                      for _ in range(3):
+                          if nxt is None: break
+                          print(str(nxt)[:500]); nxt = nxt.find_next_sibling()
+                      break
           print("=== 可能是「載入更多推文」的連結 ===")
-          for a in page.find_all("a"):
+          for a in page.find_all(["a", "button"]):
               t = a.get_text(strip=True)
               if any(k in t for k in ("更多", "載入", "全部", "推文")):
                   print(" ", repr(t)[:60], a.get("href"), a.get("onclick"))
