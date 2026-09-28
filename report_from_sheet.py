@@ -322,10 +322,13 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
   /* 透明遮罩：iframe 會吃掉點擊事件，沒有它就無法「點報告區關閉日曆」 */
   .scrim { position: fixed; inset: 0; z-index: 40; }
   .scrim[hidden] { display: none; }
+  /* 手機上日期按鈕在畫面中段，日曆從按鈕左緣展開會超出右邊界（390px 寬時
+     右側三欄和「下個月」都被切掉）。寬度封頂＋開啟時由 JS 往左推回畫面內 */
   .cal {
     position: absolute; top: calc(100% + 8px); left: 0; z-index: 50;
     background: #F5F1E8; border: 2px solid #4A1F1F;
-    padding: 14px; width: 268px;
+    padding: 14px; width: 268px; max-width: calc(100vw - 24px);
+    box-sizing: border-box;
   }
   .cal[hidden] { display: none; }
   .cal-head {
@@ -497,6 +500,16 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
     }
   }
 
+  // 日曆超出畫面右緣時往左推回來（最多推到距左緣 12px）。
+  // 寬度要用 documentElement.clientWidth：手機上日曆一超出，瀏覽器會縮小整頁
+  // 讓 innerWidth 跟著變大（390 → 449），拿它比對等於永遠「剛好放得下」
+  function fitCal() {
+    cal.style.left = "";
+    var r = cal.getBoundingClientRect();
+    var over = r.right - (document.documentElement.clientWidth - 12);
+    if (over > 0) cal.style.left = -Math.min(over, r.left - 12) + "px";
+  }
+
   function openCal(open) {
     cal.hidden = !open;
     scrim.hidden = !open;
@@ -505,6 +518,7 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
       var v = parse(selected);
       viewY = v.y; viewM = v.m;
       renderCal();
+      fitCal();
     }
   }
 
@@ -530,6 +544,7 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
     renderCal();
   });
   scrim.addEventListener("click", function () { openCal(false); });
+  window.addEventListener("resize", function () { if (!cal.hidden) fitCal(); });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") openCal(false);
   });

@@ -1,0 +1,99 @@
+name: disp.cc 來源冒煙測試
+
+# 只驗證兩件事：runner 連不連得到 disp.cc、解析器在真實頁面上抓不抓得到推文。
+# 不需要任何 secrets、不寫試算表、不 commit，所以可以放心在 PR 上自動跑。
+on:
+  push:
+    paths:
+      - 'disp_source.py'
+      - '.github/workflows/disp-smoke-test.yml'
+  pull_request:
+    paths:
+      - 'disp_source.py'
+      - '.github/workflows/disp-smoke-test.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安裝套件（只裝爬蟲需要的）
+        run: pip install requests beautifulsoup4
+
+      - name: 抓最新盤後閒聊並解析
+        run: |
+          python - <<'EOF'
+          import sys
+          import disp_source as d
+
+          s = d.make_session()
+
+          # 真實頁面結構的樣本：之後調整解析器時可以直接對照
+          soup = d._get_soup(s, d.BOARD_URL)
+          links = d._article_links(soup, d.BOARD_URL)
+          print("=== 列表頁前 5 個文章連結的 HTML ===")
+          shown = 0
+          for a in soup.find_all("a", href=True):
+              if d._ARTICLE_HREF_RE.search(a["href"].split("#")[0].split("?")[0]):
+                  print(str(a.parent)[:300]); shown += 1
+                  if shown >= 5: break
+
+          art = d.find_latest_after_market_chat(s)
+          out = d.get_article_content(s, art["url"])
+
+          page = d._get_soup(s, art["url"])
+          _, nodes = d.extract_pushes(page)
+          print("=== 前 3 則推文元素的 HTML ===")
+          for n in nodes[:3]:
+              print(str(n)[:300])
+          print("=== 最後 1 則推文元素的 HTML ===")
+          if nodes:
+              print(str(nodes[-1])[:300])
+          # 樓層缺口診斷：頁面上有幾個 push_row、哪些沒被推文規則比對到
+          rows = page.select("div.push_row")
+          matched = {id(n) for n in nodes}
+          missed = [r for r in rows if id(r) not in matched
+                    and not any(id(x) in matched for x in r.find_all(True))]
+          got = sorted(int(m.group(1)) for n in nodes
+                       if (m := d._FLOOR_RE.search(n.get_text(" ", strip=True))))
+          gaps = [(a, b) for a, b in zip(got, got[1:]) if b - a > 1]
+          print(f"=== push_row 共 {len(rows)} 個，未比對到 {len(missed)} 個；"
+                f"樓層缺口 {len(gaps)} 段，前 5 段：{gaps[:5]} ===")
+          for r in missed[:4]:
+              print(str(r)[:500])
+          if gaps:
+              a, b = gaps[0]
+              for n in nodes:
+                  t = n.get_text(" ", strip=True)
+                  if f" {a}F " in f" {t} ":
+                      nxt = n.find_next_sibling()
+                      print("--- 缺口前一則之後的兄弟元素：")
+                      for _ in range(3):
+                          if nxt is None: break
+                          print(str(nxt)[:500]); nxt = nxt.find_next_sibling()
+                      break
+          print("=== 可能是「載入更多推文」的連結 ===")
+          for a in page.find_all(["a", "button"]):
+              t = a.get_text(strip=True)
+              if any(k in t for k in ("更多", "載入", "全部", "推文")):
+                  print(" ", repr(t)[:60], a.get("href"), a.get("onclick"))
+          print("=== 前 5 則推文內容 ===")
+          for p in out["pushes"][:5]:
+              print(" ", p)
+          print("=== 內文前 200 字 ===")
+          print(out["content"][:200])
+
+          n = len(out["pushes"])
+          print(f"\n結果：{art['title']}｜推文 {n} 則｜內文 {len(out['content'])} 字")
+          if n == 0:
+              sys.exit("失敗：解析不到任何推文")
+          EOF

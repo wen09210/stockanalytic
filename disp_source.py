@@ -29,7 +29,11 @@
 3. **失敗要看得出來**：每一步都印出抓到幾個連結、幾則推文、內文取自哪個元素，
    CI log 足以判斷是被擋、結構不符還是推文被截斷。
 
-實際結構以第一次 CI 執行的 log 為準；若解析不到，把 log 貼給維護者即可調整。
+2026-09-27 已由 CI（disp-smoke-test.yml）對真實頁面驗證：runner 可連線，
+列表頁往前翻兩頁找到 09/25 盤後閒聊，推文為
+  <div class="push_row">…<span class="ptt-push-content">: 內容</span>
+  <span class="push-right">1F 09/25 08:32</span></div>
+頁面上 1314 個 push_row 全數解析；涵蓋率說明見 get_article_content 內註解。
 """
 
 import re
@@ -59,10 +63,15 @@ _PREV_PAGE_TEXTS = ("上頁", "上一頁", "前頁", "前一頁", "較舊", "舊
 
 # PTT 推文格式：「推 帳號: 內容 09/25 13:45」（帳號後的冒號可能是全形）
 _PUSH_RE = re.compile(r"^(推|噓|→)\s*([A-Za-z0-9_]{2,14})\s*[:：]\s?(.*)$", re.S)
-# 推文結尾的 IP／日期時間，要從內容剝掉，否則「09」「13」會混進詞頻
+# 推文結尾的樓層／IP／日期時間，要從內容剝掉，否則「1F」「09」「13」會混進
+# 詞頻。disp.cc 的實際格式是「: 內容 1F 09/25 08:32」（樓層在日期前）
 _PUSH_TAIL_RE = re.compile(
-    r"\s*(?:\d{1,3}(?:\.\d{1,3}){3}\s*)?\d{1,2}/\d{1,2}(?:\s+\d{1,2}:\d{2})?\s*$"
+    r"\s*(?:\d+F\s+)?(?:\d{1,3}(?:\.\d{1,3}){3}\s*)?"
+    r"\d{1,2}/\d{1,2}(?:\s+\d{1,2}:\d{2})?\s*$"
 )
+_FLOOR_RE = re.compile(r"(\d+)F\s+\d{1,2}/\d{1,2}")
+# 文章開頭的 metadata 標籤（看板／作者／標題／時間），各自下一行是值
+_META_LABELS = ("看板", "作者", "標題", "時間")
 _PUSH_MAX_LEN = 400           # 一則推文不會這麼長；超過的元素一定是外層容器
 
 # 推文數低於此值就視為可能被截斷（盤後閒聊每天約 1,500 則）
@@ -232,6 +241,20 @@ def _parse_pushes(soup: BeautifulSoup) -> tuple[list[str], list[Tag]]:
     return pushes, nodes
 
 
+def _strip_meta_header(content: str) -> str:
+    """去掉開頭的「看板 / Stock / 作者 / 帳號 (暱稱) / 標題 / … / 時間 / …」。
+
+    PTT 原站用 article-metaline 標記這段，disp.cc 沒有，只能靠文字：若開頭
+    幾行內出現「時間」標籤，就把它和它的值（下一行）以前的內容整段去掉。
+    """
+    lines = content.split("\n")
+    head = lines[:12]
+    if "時間" in head and sum(label in head for label in _META_LABELS) >= 3:
+        cut = head.index("時間") + 2
+        return "\n".join(lines[cut:])
+    return content
+
+
 def _extract_content(soup: BeautifulSoup) -> tuple[str, str]:
     """取內文，回傳 (內文, 取自哪個元素的描述)。須在移除推文元素後呼叫。
 
@@ -261,6 +284,7 @@ def _extract_content(soup: BeautifulSoup) -> tuple[str, str]:
         meta.extract()
     content = main.get_text("\n", strip=True)
     content = re.split(r"\n--\n", content)[0]   # 去掉簽名檔
+    content = _strip_meta_header(content)
     # 推文行（逐行解析時沒有元素可先移除）與 ※ 系統訊息都不算內文
     content = "\n".join(line for line in content.split("\n")
                         if not line.startswith("※")
@@ -288,10 +312,24 @@ def get_article_content(session: requests.Session, url: str) -> dict:
             except requests.exceptions.RequestException as e:
                 print(f"    AMP 版抓取失敗（{e}），沿用一般版")
 
+    # 樓層號沿用 PTT 的推文順序編號，但 disp.cc 頁面本來就不會列出每一樓：
+    # 2026-09-25 那篇最高 1493F，頁面上只有 1314 個 push_row（全數解析成功），
+    # 缺的樓層零散分布（131 段、多半一次缺一樓），不在 HTML 裡、也沒有「載入
+    # 更多」。原因無法從這端確認，實測涵蓋率約 88%。這裡記錄涵蓋率，明顯低於
+    # 平常時才警告（可能是改版或分批載入）
+    floors = [int(m.group(1)) for n in nodes
+              if (m := _FLOOR_RE.search(n.get_text(" ", strip=True)))]
+    coverage = len(nodes) / max(floors) if floors else None
+    floor_note = (f"，最高樓層 {max(floors)}F，涵蓋率 {coverage:.0%}"
+                  if floors else "")
+
     for node in nodes:
         node.extract()
     content, where = _extract_content(soup)
-    print(f"    推文 {len(pushes)} 則；內文 {len(content)} 字，取自 {where}")
+    print(f"    推文 {len(pushes)} 則{floor_note}；內文 {len(content)} 字，取自 {where}")
+    if coverage is not None and coverage < 0.75:
+        print(f"    [警告] 推文涵蓋率 {coverage:.0%} 明顯低於平常的約 88%，"
+              "頁面可能改版或改成分批載入")
     if len(pushes) < _SUSPICIOUSLY_FEW_PUSHES:
         print(f"    [提示] 盤後閒聊通常約 1,500 則推文，只抓到 {len(pushes)} 則，"
               "可能被截斷或推文格式與預期不同")
