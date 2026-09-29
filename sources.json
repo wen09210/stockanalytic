@@ -677,5 +677,19 @@
       "bullish_pct": 17.4,
       "bearish_pct": 82.6
     }
+  },
+  "2026-09-29": {
+    "title": "■ [閒聊] 2026/09/29 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/igaK",
+    "pushes": 1406,
+    "sentiment": {
+      "bullish": 59,
+      "bearish": 87,
+      "neutral": 1261,
+      "total": 1407,
+      "scored": 146,
+      "bullish_pct": 40.4,
+      "bearish_pct": 59.6
+    }
   }
 }
