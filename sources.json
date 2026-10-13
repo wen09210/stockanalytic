@@ -873,5 +873,19 @@
       "bullish_pct": 31.7,
       "bearish_pct": 68.3
     }
+  },
+  "2026-10-13": {
+    "title": "■ [閒聊] 2026/10/13 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ihwG",
+    "pushes": 1443,
+    "sentiment": {
+      "bullish": 85,
+      "bearish": 100,
+      "neutral": 1259,
+      "total": 1444,
+      "scored": 185,
+      "bullish_pct": 45.9,
+      "bearish_pct": 54.1
+    }
   }
 }
