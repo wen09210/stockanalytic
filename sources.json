@@ -901,5 +901,19 @@
       "bullish_pct": 33.9,
       "bearish_pct": 66.1
     }
+  },
+  "2026-10-15": {
+    "title": "■ [閒聊] 2026/10/15 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ihIZ",
+    "pushes": 1440,
+    "sentiment": {
+      "bullish": 71,
+      "bearish": 156,
+      "neutral": 1214,
+      "total": 1441,
+      "scored": 227,
+      "bullish_pct": 31.3,
+      "bearish_pct": 68.7
+    }
   }
 }
