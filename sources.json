@@ -915,5 +915,19 @@
       "bullish_pct": 31.3,
       "bearish_pct": 68.7
     }
+  },
+  "2026-10-16": {
+    "title": "■ [閒聊] 2026/10/16 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ihPl",
+    "pushes": 1430,
+    "sentiment": {
+      "bullish": 71,
+      "bearish": 132,
+      "neutral": 1228,
+      "total": 1431,
+      "scored": 203,
+      "bullish_pct": 35.0,
+      "bearish_pct": 65.0
+    }
   }
 }
