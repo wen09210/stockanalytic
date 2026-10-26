@@ -1055,5 +1055,19 @@
       "bullish_pct": 38.2,
       "bearish_pct": 61.8
     }
+  },
+  "2026-10-26": {
+    "title": "■ [閒聊] 2026/10/26 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/iiNx",
+    "pushes": 192,
+    "sentiment": {
+      "bullish": 7,
+      "bearish": 23,
+      "neutral": 163,
+      "total": 193,
+      "scored": 30,
+      "bullish_pct": 23.3,
+      "bearish_pct": 76.7
+    }
   }
 }
