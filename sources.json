@@ -1097,5 +1097,19 @@
       "bullish_pct": 35.4,
       "bearish_pct": 64.6
     }
+  },
+  "2026-10-29": {
+    "title": "■ [閒聊] 2026/10/29 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ijbd",
+    "pushes": 1423,
+    "sentiment": {
+      "bullish": 77,
+      "bearish": 193,
+      "neutral": 1154,
+      "total": 1424,
+      "scored": 270,
+      "bullish_pct": 28.5,
+      "bearish_pct": 71.5
+    }
   }
 }
