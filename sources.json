@@ -1167,5 +1167,19 @@
       "bullish_pct": 34.9,
       "bearish_pct": 65.1
     }
+  },
+  "2026-11-03": {
+    "title": "■ [閒聊] 2026/11/03 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ijIy",
+    "pushes": 1452,
+    "sentiment": {
+      "bullish": 90,
+      "bearish": 148,
+      "neutral": 1215,
+      "total": 1453,
+      "scored": 238,
+      "bullish_pct": 37.8,
+      "bearish_pct": 62.2
+    }
   }
 }
