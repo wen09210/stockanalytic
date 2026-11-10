@@ -1251,5 +1251,19 @@
       "bullish_pct": 38.6,
       "bearish_pct": 61.4
     }
+  },
+  "2026-11-09": {
+    "title": "■ [閒聊] 2026/11/09 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/iknh",
+    "pushes": 1413,
+    "sentiment": {
+      "bullish": 90,
+      "bearish": 123,
+      "neutral": 1201,
+      "total": 1414,
+      "scored": 213,
+      "bullish_pct": 42.3,
+      "bearish_pct": 57.7
+    }
   }
 }
