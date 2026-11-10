@@ -1265,5 +1265,19 @@
       "bullish_pct": 42.3,
       "bearish_pct": 57.7
     }
+  },
+  "2026-11-10": {
+    "title": "■ [閒聊] 2026/11/10 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ikud",
+    "pushes": 1406,
+    "sentiment": {
+      "bullish": 65,
+      "bearish": 150,
+      "neutral": 1192,
+      "total": 1407,
+      "scored": 215,
+      "bullish_pct": 30.2,
+      "bearish_pct": 69.8
+    }
   }
 }
