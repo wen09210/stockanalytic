@@ -1279,5 +1279,19 @@
       "bullish_pct": 30.2,
       "bearish_pct": 69.8
     }
+  },
+  "2026-11-11": {
+    "title": "■ [閒聊] 2026/11/11 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ikAS",
+    "pushes": 1430,
+    "sentiment": {
+      "bullish": 104,
+      "bearish": 120,
+      "neutral": 1207,
+      "total": 1431,
+      "scored": 224,
+      "bullish_pct": 46.4,
+      "bearish_pct": 53.6
+    }
   }
 }
