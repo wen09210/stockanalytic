@@ -1293,5 +1293,19 @@
       "bullish_pct": 46.4,
       "bearish_pct": 53.6
     }
+  },
+  "2026-11-12": {
+    "title": "■ [閒聊] 2026/11/12 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ikHQ",
+    "pushes": 1425,
+    "sentiment": {
+      "bullish": 54,
+      "bearish": 120,
+      "neutral": 1252,
+      "total": 1426,
+      "scored": 174,
+      "bullish_pct": 31.0,
+      "bearish_pct": 69.0
+    }
   }
 }
