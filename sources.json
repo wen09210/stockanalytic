@@ -1307,5 +1307,19 @@
       "bullish_pct": 31.0,
       "bearish_pct": 69.0
     }
+  },
+  "2026-11-13": {
+    "title": "■ [閒聊] 2026/11/13 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ikON",
+    "pushes": 1431,
+    "sentiment": {
+      "bullish": 83,
+      "bearish": 110,
+      "neutral": 1239,
+      "total": 1432,
+      "scored": 193,
+      "bullish_pct": 43.0,
+      "bearish_pct": 57.0
+    }
   }
 }
