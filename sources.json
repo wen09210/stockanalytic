@@ -1377,5 +1377,19 @@
       "bullish_pct": 31.1,
       "bearish_pct": 68.9
     }
+  },
+  "2026-11-18": {
+    "title": "■ [閒聊] 2026/11/18 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ilph",
+    "pushes": 1457,
+    "sentiment": {
+      "bullish": 59,
+      "bearish": 118,
+      "neutral": 1281,
+      "total": 1458,
+      "scored": 177,
+      "bullish_pct": 33.3,
+      "bearish_pct": 66.7
+    }
   }
 }
