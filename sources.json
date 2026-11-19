@@ -1391,5 +1391,19 @@
       "bullish_pct": 33.3,
       "bearish_pct": 66.7
     }
+  },
+  "2026-11-19": {
+    "title": "■ [閒聊] 2026/11/19 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/ilvy",
+    "pushes": 1411,
+    "sentiment": {
+      "bullish": 91,
+      "bearish": 108,
+      "neutral": 1213,
+      "total": 1412,
+      "scored": 199,
+      "bullish_pct": 45.7,
+      "bearish_pct": 54.3
+    }
   }
 }
