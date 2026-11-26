@@ -1463,17 +1463,17 @@
     }
   },
   "2026-11-25": {
-    "title": "■ [閒聊] 2026/11/24 盤後閒聊",
-    "url": "https://disp.cc/b/Stock/im1K",
-    "pushes": 1464,
+    "title": "■ [閒聊] 2026/11/25 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/im7g",
+    "pushes": 1480,
     "sentiment": {
-      "bullish": 101,
-      "bearish": 108,
-      "neutral": 1256,
-      "total": 1465,
-      "scored": 209,
-      "bullish_pct": 48.3,
-      "bearish_pct": 51.7
+      "bullish": 53,
+      "bearish": 122,
+      "neutral": 1306,
+      "total": 1481,
+      "scored": 175,
+      "bullish_pct": 30.3,
+      "bearish_pct": 69.7
     }
   }
 }
