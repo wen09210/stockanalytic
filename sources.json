@@ -1475,5 +1475,19 @@
       "bullish_pct": 30.3,
       "bearish_pct": 69.7
     }
+  },
+  "2026-11-27": {
+    "title": "■ [閒聊] 2026/11/26 盤後閒聊",
+    "url": "https://disp.cc/b/Stock/imas",
+    "pushes": 1397,
+    "sentiment": {
+      "bullish": 58,
+      "bearish": 130,
+      "neutral": 1210,
+      "total": 1398,
+      "scored": 188,
+      "bullish_pct": 30.9,
+      "bearish_pct": 69.1
+    }
   }
 }
